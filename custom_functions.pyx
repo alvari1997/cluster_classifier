@@ -1,6 +1,8 @@
 #from cython.view cimport array as cvarray
 import numpy as np
 cimport numpy as np
+from scripts import merge_labels
+import time
 #import cv2
 #from collections import deque
 
@@ -15,54 +17,15 @@ def groundRemoval(np.ndarray[np.float64_t, ndim=3] packet): #remove ground with 
     cdef float dhv
     cdef float dhh
     cdef float ground_angle
+
     for i in range(packet.shape[0]-1):
         for j in range(2,packet.shape[1]-2):
             if packet[i,j,5] > -10 and packet[i,j,5] < -1.3: #first condition
                 #packet[i,j,6] = 1 #label ground
-                dhh = (2*packet[i,j,3] + packet[i,j-1,3]) - (2*packet[i,j+1,3] + packet[i,j+2,3]) #1x4
+                dhh = (2*packet[i,j,5] + packet[i,j-1,5]) - (2*packet[i,j+1,5] + packet[i,j+2,5]) #1x4
                 #dhh = (2*packet[i,j,5] + packet[i+1,j,5]) - (2*packet[i,j+1,5] + packet[i+1,j+1,5]) #2x2
 
-                '''temp_array = np.array([packet[i,j-1,3], packet[i,j,3], packet[i,j+1,3], packet[i,j+2,3]])
-                temp_array = (temp_array > 0.01) * temp_array
-                temp_min = np.min(temp_array[np.nonzero(temp_array)])
-                temp_max = np.max(temp_array[np.nonzero(temp_array)])
-                if abs(temp_max - temp_min) < threshold:'''
-
-
-                '''if packet[i,j,3] > 0.001 and packet[i,j+1,3] > 0.001:
-                    if abs(packet[i,j,3] - packet[i,j+1,3]) < threshold:
-                        pass1 = 1
-                    else:
-                        pass1 = 0
-                else:
-                    pass1 = 1
-
-                if packet[i,j,3] > 0.001 and packet[i,j-1,3] > 0.001:
-                    if abs(packet[i,j,3] - packet[i,j-1,3]) < threshold:
-                        pass2 = 1
-                    else:
-                        pass2 = 0
-                else:
-                    pass2 = 1
-
-                if packet[i,j+2,3] > 0.001 and packet[i,j+1,3] > 0.001:
-                    if abs(packet[i,j+2,3] - packet[i,j+1,3]) < threshold:
-                        pass3 = 1
-                    else:
-                        pass3 = 0
-                else:
-                    pass3 = 1
-
-                if packet[i,j-2,3] > 0.001 and packet[i,j-1,3] > 0.001:
-                    if abs(packet[i,j-2,3] - packet[i,j-1,3]) < threshold:
-                        pass4 = 1
-                    else:
-                        pass4 = 0
-                else:
-                    pass4 = 1
-
-                if pass1 == 1 and pass2 == 1 and pass3 == 1 and pass4 == 1:'''
-                if dhh > -10 and dhh < 10: #second condition, 10
+                if dhh > -1 and dhh < 1: #second condition, 10
                     #packet[i,j,6] = 1 #label ground
 
                     ddv = (2*packet[i,j,3] + packet[i,j+1,3]) - (2*packet[i+1,j,3] + packet[i+1,j+1,3])
@@ -71,7 +34,7 @@ def groundRemoval(np.ndarray[np.float64_t, ndim=3] packet): #remove ground with 
                     else:
                         ground_angle = 0
                     bias = 0.0
-                    if ground_angle > -0.1+bias and ground_angle < 0.1+bias: #third condition, 0.5
+                    if ground_angle > -0.2+bias and ground_angle < 0.2+bias: #third condition, 0.5
                         for k in range(6):
                             packet[i, j, k] = 0
                         packet[i,j,6] = 1 #label ground'''
@@ -90,6 +53,7 @@ def clustering(np.ndarray[np.float64_t, ndim=3] packet):
     #bfs(packet,1,1,l)
 
 def bfs(np.ndarray[np.float64_t, ndim=3] packet, int r, int c, int l):
+
     cdef Py_ssize_t i,g
     cdef list r_queue = []
     cdef list c_queue = []
@@ -134,3 +98,24 @@ def bfs(np.ndarray[np.float64_t, ndim=3] packet, int r, int c, int l):
         c_queue.pop()
         #print(len(r_queue))
 
+
+def mergetest(np.ndarray[np.double_t, ndim=2] cluster_prediction_processed, np.ndarray[np.long_t, ndim=2] new_boundary, int packet_w):
+    old_boundary = cluster_prediction_processed[0:64, cluster_prediction_processed.shape[1]-packet_w-2:cluster_prediction_processed.shape[1]-packet_w]
+
+    cdef Py_ssize_t i,j
+    cdef int smaller_label = 0
+    cdef int bigger_label = 0
+
+    start = time.time()
+    for j in range(old_boundary.shape[0]):
+        for i in range(old_boundary.shape[1]):
+            if old_boundary[j, i] != 0 and new_boundary[j, i] != 0:
+                smaller_label = np.min([old_boundary[j, i], new_boundary[j, i]])
+                bigger_label = np.max([old_boundary[j, i], new_boundary[j, i]])
+                # change labels of max to mins
+                cluster_prediction_processed[cluster_prediction_processed == bigger_label] = smaller_label
+                new_boundary[new_boundary == bigger_label] = smaller_label
+    stop = time.time()
+    print(stop-start)
+
+    return cluster_prediction_processed
