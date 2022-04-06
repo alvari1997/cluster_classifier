@@ -6,9 +6,9 @@ from tracemalloc import start
 import numpy as np
 import cv2
 import time
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import glob, os
-import ctypes
+#import ctypes
 from scripts import custom_functions
 from scripts import plane_fit
 from scripts import merge_labels
@@ -16,7 +16,7 @@ from scripts import merge_labels
 from scripts.laserscan import SemLaserScan, LaserScan
 import argparse
 from depth_cluster.build import Depth_Cluster
-from ground_removal.build import Ground_Removal
+#from ground_removal.build import Ground_Removal
 #import pyransac3d as pyrsc
 import random
 
@@ -32,7 +32,7 @@ parser.add_argument('--mode', dest= "mode", default='val', help="val or test; ")
 
 args = parser.parse_args()
 
-inv_label_dict_reverse = {0:0,10:1,11:2,15:3,18:4,20:5,30:6,31:7,32:8,40:9,44:10,48:11,49:12,50:13,51:14,70:15,71:16,72:17,80:18,81:19}
+#inv_label_dict_reverse = {0:0,10:1,11:2,15:3,18:4,20:5,30:6,31:7,32:8,40:9,44:10,48:11,49:12,50:13,51:14,70:15,71:16,72:17,80:18,81:19}
 #label numbers for ground plane: 40,44,48,49,60,72
 
 sequence_in = args.sequence_in
@@ -41,7 +41,7 @@ if args.which_cluster == 1:
 	cluster = Depth_Cluster.Depth_Cluster(0.15,9) #angle threshold 0.15 (smaller th less clusters), search steps 9
 
 #if args.which_cluster==1:
-groundremoval = Ground_Removal.Ground_Removal(0.15,9) #angle threshold, search steps
+#groundremoval = Ground_Removal.Ground_Removal(0.15,9) #angle threshold, search steps
 
 def key_func(x):
         return os.path.split(x)[-1]
@@ -224,9 +224,9 @@ def full_scan():
 
         test_img = np.vstack((orig_range_img, range_projected))
 
-        normed = cv2.normalize(test_img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        '''normed = cv2.normalize(test_img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color = cv2.applyColorMap(normed, cv2.COLORMAP_HOT)
-        '''cv2.imshow("test", color)
+        cv2.imshow("test", color)
         cv2.waitKey(1000)'''
 
         range_img_crop = range_img_pre[0:64, 0:20]
@@ -259,13 +259,12 @@ def full_scan():
         #print('IoU:', IoU)
         #print(int(i/len(lidar_data)*100), '%')
 
-        normed2 = cv2.normalize(instance_label, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        '''normed2 = cv2.normalize(instance_label, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color2 = cv2.applyColorMap(normed2, cv2.COLORMAP_JET)
-
         test_img2 = np.vstack((color, color2))
 
         cv2.imshow("test", test_img2)
-        cv2.waitKey(1000)
+        cv2.waitKey(1000)'''
     
     print('mean pixel accuracy:', np.mean(pixel_accuracies))
     print('mIoU:', np.mean(IoUs))
@@ -333,6 +332,7 @@ def packets():
         gt_mask = gt_i > 0
 
         packet_w = 64
+        #packet_w = 128
         range_packet = range_img_pre[0:64, 0:packet_w]
         range_processed = np.zeros((64,0))
         xyz_packet = xyz[0:64, 0:packet_w]
@@ -343,8 +343,6 @@ def packets():
         ground_prediction_processed = np.zeros((64,0))
         cluster_prediction_packet = np.zeros((64, packet_w))
         cluster_prediction_processed = np.zeros((64,0))
-
-        merged_labels = []
 
         # timers
         clustering_time = 0
@@ -399,10 +397,16 @@ def packets():
 
             #print(cluster_input_prediction[:,63])
 
+            # fetch current label
+            current_label = 0
+            if p > 1:
+                current_label = np.max(cluster_prediction_processed)
+
             ranges = cluster_input_range.reshape(-1)
             cluster_predictions = cluster_input_prediction.reshape(-1)
             start = time.time()
-            instance_prediction = cluster.Packet_cluster(ranges, cluster_predictions)
+            print("aaaaaaaaaaaaaaaaa")
+            instance_prediction = cluster.Packet_cluster(ranges, cluster_predictions, int(current_label))
             stop = time.time()
             #print(stop-start)
             clustering_time = clustering_time + stop-start
@@ -431,22 +435,28 @@ def packets():
             ground_prediction_processed = np.hstack((ground_prediction_processed, ground_prediction_packet))
             cluster_prediction_processed = np.hstack((cluster_prediction_processed, cluster_prediction_packet))
 
+            # delete small clusters
+            cluster_idx = set(cluster_prediction_processed[cluster_prediction_processed != 0])
+            for c in cluster_idx:
+                if np.count_nonzero(cluster_prediction_processed == c) < 10:
+                    cluster_prediction_processed[cluster_prediction_processed == c] = 0
+            
             # merge labels
-            start = time.time()
-            cluster_prediction_processed = merge.mergeLabels(cluster_prediction_processed, boundary, packet_w)
+            #start = time.time()
+            #cluster_prediction_processed = merge.mergeLabels(cluster_prediction_processed, boundary, packet_w)
+            #stop = time.time()
             #if cluster_prediction_processed.shape[1] > 10:
-            #cluster_prediction_processed = custom_functions.mergetest(cluster_prediction_processed, boundary, packet_w)
-            stop = time.time()
-            #print(stop-start)
+            #start = time.time()
+            cluster_prediction_processed = custom_functions.mergeLabels(cluster_prediction_processed, boundary, packet_w)
+            #stop = time.time()
+            #print(32*(stop-start))
+            #print((stop-start) - (stop1-start1))
             clustering_time = clustering_time + stop-start
 
             # if right edge of cluster is not touching the right edge of image -> filter or classify
             
             
             # update packet
-            #range_packet = np.hstack((range_processed[0:64, range_processed.shape[1]-1:range_processed.shape[1]], range_img_pre[0:64, p*packet_w+0:p*packet_w+packet_w]))
-            #xyz_packet = np.hstack((xyz_processed[0:64, xyz_processed.shape[1]-1:xyz_processed.shape[1]], xyz[0:64, p*packet_w+1:p*packet_w+packet_w]))
-            #xyz_cyl_packet = np.hstack((xyz_cyl_processed[0:64, xyz_cyl_processed.shape[1]-1:xyz_cyl_processed.shape[1]], xyz_cyl[0:64, p*packet_w+1:p*packet_w+packet_w]))
             range_packet = range_img_pre[0:64, p*packet_w:p*packet_w+packet_w]
             xyz_packet = xyz[0:64, p*packet_w:p*packet_w+packet_w]
             xyz_cyl_packet = xyz_cyl[0:64, p*packet_w:p*packet_w+packet_w]
@@ -461,23 +471,15 @@ def packets():
         cv2.imshow("test_packet", color_packet)
         cv2.waitKey(1)'''
 
-        cluster_test = np.zeros((64, 2048))
-        cluster_test[cluster_prediction_processed == 1000] = 1
-        cluster_test[cluster_prediction_processed == 500] = 1
-        cluster_test[cluster_prediction_processed == 100] = 1
-        cluster_mask = cluster_test > 0
-
-        # car labels
-        panoptic_label_img[semantic_label_img == 10] = panoptic_label_img[semantic_label_img == 10]
-        panoptic_label_img[semantic_label_img != 10] = 0
-
         normed_packet = cv2.normalize(cluster_prediction_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_HOT)
-        cv2.imshow("range", color_packet)
+        cv2.imshow("test", color_packet)
         cv2.waitKey(100)
 
-        #print(clustering_time)
-        print(ground_time)
+        print(' ')
+        print("cluster: ", clustering_time)
+        print("ground: ", ground_time)
+        print("cluster+ground: ", clustering_time + ground_time)
         #print(np.max(cluster_prediction_processed))
 
         '''normed_packet = cv2.normalize(range_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
@@ -564,7 +566,7 @@ def main():
     #full_scan()
     packets()
     #test3()
-    cv2.destroyAllWindows()
+    #cv2.destroyAllWindows()
     
 if __name__ == '__main__':
     main()
