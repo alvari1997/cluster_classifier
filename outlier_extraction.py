@@ -92,17 +92,21 @@ def full_scan():
         start = time.time()
         instance_label = cluster.Depth_cluster(range_img)
         stop = time.time()
-        print(stop-start)
+        #print(stop-start)
         instance_label=np.asarray(instance_label).reshape(64,2048)
 
+        #print(np.max(instance_label))
+
         # save clusters
+        #clu = 0
         cluster_idx = set(instance_label[instance_label != 0])
         for c in cluster_idx:
             clusterr = xyz[instance_label == c].reshape(-1, 3)
             if clusterr.shape[0] < 20:
                 continue
             #print(clusterr)
-            print(clusterr.shape[0])
+            #print(clusterr.shape[0])
+            #clu += 1
 
             # normalize
             points_canonical = points_to_center(clusterr)
@@ -116,7 +120,7 @@ def full_scan():
             #pcd_load = o3d.io.read_point_cloud('outlier_vis/{}_scan_{}_cluster.ply'.format(i, c))
             #o3d.visualization.draw_geometries([pcd_load])
 
-
+        #print(clu)
         #print(np.max(instance_label))
 
         '''normed_packet = cv2.normalize(instance_label, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)

@@ -124,14 +124,15 @@ for epoch in range(opt.nepoch):
             loss += feature_transform_regularizer(trans_feat) * 0.001
         
         # add energy loss
-        m_in = -5
-        m_out = -2
+        m_in = -5 #winner
+        m_out = -2 #winner
+        # tried
         #m_in = -0.1
         #m_out = -1
+        #m_in = 5 
+        #m_out = 2 
         Ec_out = -torch.logsumexp(out[len(data[0]):], dim=1)
         Ec_in = -torch.logsumexp(out[:len(data[0])], dim=1)
-        #print(Ec_out.mean())
-        #print(Ec_in.mean())
         loss += 0.1*(torch.pow(F.relu(Ec_in-m_in), 2).mean() + torch.pow(F.relu(m_out-Ec_out), 2).mean())
 
         # plot loss

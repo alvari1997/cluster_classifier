@@ -32,6 +32,8 @@ T = 1000
 a = 1
 n = 30
 
+max_i = 100
+
 '''test_dataset = ShapeNetDataset(
     root='shapenetcore_partanno_segmentation_benchmark_v0',
     split='test',
@@ -85,17 +87,19 @@ totalCars = 0
 
 for i, data in enumerate(testdataloader, 0):
 
-    if i > 100:
+    if i > max_i:
         break
 
-    start = time.time()
     points, target = data
     points, target = Variable(points), Variable(target[:, 0])
     points = points.transpose(2, 1)
     points, target = points.cpu(), target.cpu()
 
     # run PointNet
+    start = time.time()
     pred, global_feat, avg, out = classifier(points)
+    stop = time.time()
+    print(stop-start)
     #print(pred)
 
     loss = F.nll_loss(pred, target)
@@ -158,8 +162,7 @@ for i, data in enumerate(testdataloader, 0):
     if target[0] == 0:
         totalCars = totalCars + 1
 
-    stop = time.time()
-    print(stop-start)
+    
     print('i:%d  loss: %f accuracy: %f' % (i, loss.data.item(), correct / float(32)))
 
     accuracy_scores.append(correct/float(32))
@@ -190,7 +193,7 @@ last_layer_outliers = []
 
 for i, data in enumerate(testdataloader, 0):
 
-    if i > 100:
+    if i > max_i:
         break
 
     start = time.time()
@@ -248,12 +251,13 @@ for i, data in enumerate(testdataloader, 0):
 
 print("ID ", np.mean(last_layer))
 print("OoD ", np.mean(last_layer_outliers))
-plt.plot(range(len(last_layer)), last_layer, label="In distribution (Car, Person, Cyclist, Van)")
-plt.plot(range(len(last_layer_outliers)), last_layer_outliers, label="Out of distribution (Random clusters)")
+plt.plot(range(len(last_layer)), last_layer, "o", label="In distribution (Car, Person, Cyclist, Van)")
+plt.plot(range(len(last_layer_outliers)), last_layer_outliers, "o", label="Out of distribution (Random clusters)")
 plt.hlines(-2.2, 0, i, colors="Black", linestyles="--", label="Threshold")
 plt.legend(loc="lower left")
 plt.xlabel("Cluster i")
 plt.ylabel("Energy")
 #plt.title("Default training")
 plt.title("Trained with energy loss function")
+plt.ylim(-20, 2)
 plt.show()

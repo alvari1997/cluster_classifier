@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 #from msilib import sequence
+import torch
+from torch.autograd import Variable
+from pointnet.custom_models import PointNetCls
 from struct import pack
 from tracemalloc import start
 import numpy as np
@@ -8,17 +11,14 @@ import cv2
 import time
 #import matplotlib.pyplot as plt
 import glob, os
-#import ctypes
 from scripts import custom_functions
 from scripts import plane_fit
 from scripts import merge_labels
-#import clustering_function_py
 from scripts.laserscan import SemLaserScan, LaserScan
 import argparse
 from depth_cluster.build import Depth_Cluster
-#from ground_removal.build import Ground_Removal
-#import pyransac3d as pyrsc
 import random
+import open3d as o3d
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--sequence',dest= "sequence_in", default='00', help='')
@@ -29,7 +29,6 @@ parser.add_argument('--range_x', dest= "range_x", default=2048, help="2048")
 parser.add_argument('--minimum_points', dest= "minimum_points", default=40, help="minimum_points of each class")
 parser.add_argument('--which_cluster', dest= "which_cluster", default=1, help="4: ScanLineRun clustering; 3: superVoxel clustering; 2: euclidean; 1: depth_cluster; ")
 parser.add_argument('--mode', dest= "mode", default='val', help="val or test; ")
-
 args = parser.parse_args()
 
 #inv_label_dict_reverse = {0:0,10:1,11:2,15:3,18:4,20:5,30:6,31:7,32:8,40:9,44:10,48:11,49:12,50:13,51:14,70:15,71:16,72:17,80:18,81:19}
@@ -37,82 +36,22 @@ args = parser.parse_args()
 
 sequence_in = args.sequence_in
 
+# cluster setup
 if args.which_cluster == 1:
 	cluster = Depth_Cluster.Depth_Cluster(0.15,9) #angle threshold 0.15 (smaller th less clusters), search steps 9
 
-#if args.which_cluster==1:
-#groundremoval = Ground_Removal.Ground_Removal(0.15,9) #angle threshold, search steps
+
+# classifier setup
+classifier = PointNetCls(k=4)
+classifier.cpu()
+# load weights
+classifier.load_state_dict(torch.load('cls_model_99.pth'))
+# set evaluation mode
+classifier.eval()
+
 
 def key_func(x):
         return os.path.split(x)[-1]
-
-def cluster_classifier():
-    #for filename in sorted(glob.glob('org_pointclouds/*.npy'), key=key_func):
-    #data = np.load(filename)
-    data = np.load('org_pointclouds/0000000035.npy')
-
-    #append label channel
-    data = np.append(data, np.zeros((64, 1900, 1)), axis=2)
-
-    packet = data[0:64, 0:19] #10 columns
-    original = np.copy(packet)
-    original2 = np.copy(packet)
-    original3 = np.copy(packet)
-    original4 = np.copy(packet)
-    tail = data[0:64, 0:1003] #1003 columns
-
-    '''normed = cv2.normalize(packet[:,:,3], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    color = cv2.applyColorMap(normed, cv2.COLORMAP_JET)
-    cv2.imshow("test1", color)
-    cv2.waitKey(0)'''
-
-    start = time.time()
-    custom_functions.groundRemoval(packet)
-    stop = time.time()
-    #print(new)
-    print(1000*(stop-start)/(100/1900))
-        
-    '''plt.plot(np.arange(0,64,1), original[:,0,5], label="old")
-    plt.plot(np.arange(0,64,1), packet[:,0,5], label="new")
-    plt.legend()
-    plt.show()'''
-
-    '''normed = cv2.normalize(packet[:,:,3], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    color = cv2.applyColorMap(normed, cv2.COLORMAP_JET)
-    cv2.imshow("test", color)
-    cv2.waitKey(0)'''
-
-    start = time.time()
-    custom_functions.clustering(packet)
-    stop = time.time()
-    #print(new)
-    print(1000*(stop-start)/(100/1900))
-
-    '''normed = cv2.normalize(packet[:,:,6], None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    color = cv2.applyColorMap(normed, cv2.COLORMAP_JET)
-    cv2.imshow("test3", color)
-    cv2.waitKey(0)'''
-
-    '''height_map = original4[:,:,5]
-    distance_map = original4[:,:,3]
-    label_map = original4[:,:,6]
-    start = time.time()
-    #ground gradient
-    dhv = cv2.Sobel(height_map,cv2.CV_64F,0,1,ksize=3)
-    dhh = cv2.Sobel(height_map,cv2.CV_64F,1,0,ksize=3)
-    ddv = cv2.Sobel(distance_map,cv2.CV_64F,0,1,ksize=3)
-    ground_angle = dhv/ddv
-    #ground threshold, bool
-    h_i = np.logical_and(height_map > -4, height_map < -1.3)
-    x_i = np.logical_and(dhh > -5, dhh < 5)
-    y_i = np.logical_and(ground_angle > -0.2, ground_angle < 0.2)
-    #combine to get ground indicies
-    ground_mask = x_i * y_i * h_i #all pixels that are part of the ground
-    #delete ground
-    distance_map[ground_mask] = 0
-    label_map[ground_mask] = -1
-    stop = time.time()
-    print(1000*(stop-start)/(100/1900))'''
 
 def appendCylindrical_np(xyz):
     ptsnew = np.dstack((xyz, np.zeros(xyz.shape)))
@@ -271,7 +210,6 @@ def full_scan():
 
 def packets():
     Scan = LaserScan(project=True, flip_sign=False, H=args.range_y, W=args.range_x, fov_up=3.0, fov_down=-25.0)
-    #Label = SemLaserScan(nclasses=20, sem_color_dict=None, project=False, flip_sign=False, H=64, W=1024, fov_up=3.0, fov_down=-25.0)
 
     # load data
     #lidar_data = sorted(glob.glob('scripts/data3/*.bin'), key=key_func)
@@ -284,25 +222,26 @@ def packets():
     F1scores = []
     precisions = []
 
-    #plane1 = pyrsc.Plane()
     plane1 = plane_fit.Plane()
 
-    merge = merge_labels.Merge()
+    #merge = merge_labels.Merge()
 
     for i in range(len(lidar_data)):
+
         # open lidar data
         Scan.open_scan(lidar_data[i])
 
         # organize pc
         range_img_pre = Scan.proj_range
-        orig_range_img = np.copy(range_img_pre)
-        test_range_img = np.copy(range_img_pre)
-        xyz = Scan.proj_xyz #runtime 0.001 ms
+        xyz = Scan.proj_xyz
+        #orig_range_img = np.copy(range_img_pre)
+        #test_range_img = np.copy(range_img_pre)
 
         # add cylindrical coordinates
         xyz_cyl = appendCylindrical_np(xyz) #runtime 9 ms
+
         # add label channel
-        xyz_cyl = np.append(xyz_cyl, np.zeros((64, 2048, 1)), axis=2) #runtime 3 ms
+        xyz_cyl = np.append(xyz_cyl, np.zeros((64, 2048, 1)), axis=2) 
 
         # open label data
         panoptic_label = np.fromfile(label_data[i], dtype=np.uint32)
@@ -321,7 +260,7 @@ def packets():
                 #semantic_label_img[y_range,x_range] = semantic_label_inv[jj]
                 #depth_img[y_range,x_range] = Scan.unproj_range[jj]
 
-        # create gt ground plane mask #label numbers for ground plane: 40,44,48,49,60,72
+        # create gt ground plane mask, label numbers for ground plane: 40,44,48,49,60,72
         gt_i = np.zeros((64, 2048))
         gt_i[semantic_label_img == 40] = 1
         gt_i[semantic_label_img == 44] = 1
@@ -330,7 +269,8 @@ def packets():
         gt_i[semantic_label_img == 60] = 1
         gt_i[semantic_label_img == 72] = 1
         gt_mask = gt_i > 0
-
+        
+        # create data packets
         packet_w = 64
         #packet_w = 128
         range_packet = range_img_pre[0:64, 0:packet_w]
@@ -348,16 +288,15 @@ def packets():
         clustering_time = 0
         ground_time = 0
 
+        # simulate packet streaming
         for p in range(1, int(range_img_pre.shape[1]/packet_w+1)):
 
-            # sample ground points with sobel
+            # sample ground points with sobel filter
             start = time.time()
             ground_i = custom_functions.groundRemoval(xyz_cyl_packet)[:,:,6] #runtime - ms
             stop = time.time()
             ground_time = ground_time + stop - start
-            #print('ground sample time:', stop-start)
             ground_mask = ground_i > 0
-            #range_packet[ground_mask] = 0
 
             # fit plane with RANSAC
             all_points = xyz_packet.reshape(-1, 3)
@@ -367,7 +306,6 @@ def packets():
                 best_eq, best_inliers = plane1.fit(pts=ground_points, all_pts=all_points, thresh=0.15, minPoints=100, maxIteration=10)#th=0.15
                 stop = time.time()
                 ground_time = ground_time + stop - start
-                #print('time:',stop-start)
                 range_unprojected = range_packet.reshape(-1)
                 range_unprojected[best_inliers] = 0
                 range_packet = range_unprojected.reshape(range_packet.shape[0], range_packet.shape[1])
@@ -375,7 +313,6 @@ def packets():
                 ground_prediction_unprojected[best_inliers] = 1
                 ground_prediction_packet = ground_prediction_unprojected.reshape(ground_prediction_packet.shape[0], ground_prediction_packet.shape[1])
 
-            # cluster
             # add previous columns to the packet
             if p == 1:
                 cluster_input_range = np.hstack((np.zeros((64,packet_w)), range_packet))
@@ -383,50 +320,26 @@ def packets():
             else:
                 cluster_input_range = np.hstack((range_processed[0:64, range_processed.shape[1]-packet_w:range_processed.shape[1]], range_packet))
                 cluster_input_prediction = np.hstack((cluster_prediction_processed[0:64, cluster_prediction_processed.shape[1]-packet_w:cluster_prediction_processed.shape[1]], cluster_prediction_packet))
-            # cluster
-
-            '''normed_packet = cv2.normalize(cluster_input_range, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_JET)
-            cv2.imshow("range in", color_packet)
-            cv2.waitKey(0)'''
-
-            '''normed_packet = cv2.normalize(cluster_input_prediction, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_JET)
-            cv2.imshow("labels in", color_packet)
-            cv2.waitKey(0)'''
-
-            #print(cluster_input_prediction[:,63])
-
+                
             # fetch current label
             current_label = 0
             if p > 1:
                 current_label = np.max(cluster_prediction_processed)
 
+            # local clustering
             ranges = cluster_input_range.reshape(-1)
             cluster_predictions = cluster_input_prediction.reshape(-1)
             start = time.time()
-            print("aaaaaaaaaaaaaaaaa")
-            instance_prediction = cluster.Packet_cluster(ranges, cluster_predictions, int(current_label))
+            instance_prediction = cluster.Packet_cluster(ranges, int(current_label))
             stop = time.time()
-            #print(stop-start)
             clustering_time = clustering_time + stop-start
+
             # remove first columns
             cluster_output_prediction = np.asarray(instance_prediction).reshape(64, packet_w+packet_w)
             cluster_prediction_packet = cluster_output_prediction[0:64, cluster_output_prediction.shape[1]-packet_w:cluster_output_prediction.shape[1]]
 
-            #stitcher = cluster_output_prediction[0:64, cluster_output_prediction.shape[1]-packet_w-1:cluster_output_prediction.shape[1]-packet_w]
+            # assign boundary region
             boundary = cluster_output_prediction[0:64, cluster_output_prediction.shape[1]-packet_w-2:cluster_output_prediction.shape[1]-packet_w]
-
-            '''resized_stitcher = cv2.resize(np.float32(stitcher), (20,256), interpolation = cv2.INTER_AREA)
-            cv2.imshow("sticher", resized_stitcher)
-            cv2.waitKey(100)'''
-
-            #print(np.max(cluster_output_prediction))
-
-            '''normed_packet = cv2.normalize(cluster_output_prediction, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-            color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_JET)
-            cv2.imshow("out", color_packet)
-            cv2.waitKey(100)'''
 
             # add processed packet to processed array
             range_processed = np.hstack((range_processed, range_packet))
@@ -441,20 +354,20 @@ def packets():
                 if np.count_nonzero(cluster_prediction_processed == c) < 10:
                     cluster_prediction_processed[cluster_prediction_processed == c] = 0
             
-            # merge labels
-            #start = time.time()
-            #cluster_prediction_processed = merge.mergeLabels(cluster_prediction_processed, boundary, packet_w)
-            #stop = time.time()
-            #if cluster_prediction_processed.shape[1] > 10:
-            #start = time.time()
+            # global clustering
+            start = time.time()
             cluster_prediction_processed = custom_functions.mergeLabels(cluster_prediction_processed, boundary, packet_w)
-            #stop = time.time()
-            #print(32*(stop-start))
-            #print((stop-start) - (stop1-start1))
+            stop = time.time()
             clustering_time = clustering_time + stop-start
 
-            # if right edge of cluster is not touching the right edge of image -> filter or classify
-            
+            # if right edge of cluster is not touching the right edge of image, append to cluster instance id a list, check if list len > batch_size
+            # get points of each instance id, random.choice(100pts), centering
+            # numpy array: points (batch_size, max_points(=100), 3)
+            # NN input: points = torch.tensor([batch_size, max_points(=100), 3])
+            # NN output: 2 x torch.tensor([batch_size, classes]) 
+            # compute energy, threshold, if ID, argmax(pred)
+            # match labels with instance ids
+            # update precessed semantic img
             
             # update packet
             range_packet = range_img_pre[0:64, p*packet_w:p*packet_w+packet_w]
@@ -463,13 +376,59 @@ def packets():
             ground_prediction_packet = np.zeros((64, packet_w))
             cluster_prediction_packet = np.zeros((64, packet_w))
 
-        orig_range_img[gt_mask] = 0
-        stacked = np.vstack((range_processed, orig_range_img))
+        '''# save clusters, ~100 clusters per scan
+        cluster_idx = set(cluster_prediction_processed[cluster_prediction_processed != 0])
+        for c in cluster_idx:
+            clusterr = xyz[cluster_prediction_processed == c].reshape(-1, 3)
+            if clusterr.shape[0] < 20:
+                continue
+            
+            # sample n points 
+            choice = np.random.choice(len(clusterr), 100, replace=True)
 
-        '''normed_packet = cv2.normalize(stacked, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_HOT)
-        cv2.imshow("test_packet", color_packet)
-        cv2.waitKey(1)'''
+            # resample
+            point_set = clusterr[choice, :]
+
+            point_set = point_set - np.expand_dims(np.mean(point_set, axis = 0), 0) # center
+            dist = np.max(np.sqrt(np.sum(point_set ** 2, axis = 1)),0)
+            point_set = point_set / dist #scale
+
+            point_set = torch.from_numpy(point_set)
+
+            torch.unsqueeze(point_set, 0)
+
+            print(point_set.shape)
+            #points.shape == 1,100,3
+
+            points = point_set
+            points = Variable(points)
+            points = points.transpose(2, 1)
+            points = points.cpu()
+
+            #points.shape == 1,3,100
+
+            # run PointNet
+            pred, global_feat, avg, out = classifier(points)'''
+            
+    
+        # visualize clusters
+        cluster_idx = set(cluster_prediction_processed[cluster_prediction_processed != 0])
+        for c in cluster_idx:
+            clusterr = xyz[cluster_prediction_processed == c].reshape(-1, 3)
+            if clusterr.shape[0] < 20:
+                continue
+
+            # normalize
+            #points_canonical = points_to_center(clusterr)
+
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(clusterr)
+            #o3d.io.write_point_cloud('outlier_cluster_dataset/{}_seq_{}_scan_{}_cluster.pts'.format(sequence_in, i, c), pcd)
+            #o3d.io.write_point_cloud('outlier_vis/{}_scan_{}_cluster.ply'.format(i, c), pcd)
+
+            # visualize
+            #pcd_load = o3d.io.read_point_cloud('outlier_vis/{}_scan_{}_cluster.ply'.format(i, c))
+            #o3d.visualization.draw_geometries([pcd])
 
         normed_packet = cv2.normalize(cluster_prediction_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_HOT)
@@ -480,12 +439,6 @@ def packets():
         print("cluster: ", clustering_time)
         print("ground: ", ground_time)
         print("cluster+ground: ", clustering_time + ground_time)
-        #print(np.max(cluster_prediction_processed))
-
-        '''normed_packet = cv2.normalize(range_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-        color_packet = cv2.applyColorMap(normed_packet, cv2.COLORMAP_JET)
-        cv2.imshow("test_packet2", color_packet)
-        cv2.waitKey(200)'''
 
         # check ground accuracy
         TP = np.sum(np.logical_and(ground_prediction_processed == 1, gt_i == 1))
@@ -517,56 +470,10 @@ def packets():
     # F1-score: 0.798 
     # precision: 0.841 
 
-def test3():
-    array1 = np.array([[0,2,1,1], [2,2,3,3], [1,8,1,2]])
-    array2 = np.array([[2,3,2,2], [4,4,5,5], [1,7,1,2]])
-
-    #print(array1)
-    #print(array2)
-
-    array3 = np.dstack((array1, array2))
-
-    image = np.array([[0,1,1,1,5],[2,2,2,2,2],[3,3,2,2,2]])
-
-    print(image)
-
-    #lookup = array3.reshape(-1,2)
-    lookup = np.array([[0,9],[1,8]])
-    lookup = np.asarray(lookup)
-    replacer = np.arange(image.max()+1)
-    replacer[lookup[:,0]] = lookup[:,1]
-    result = replacer[image]
-
-    print(result)
-
-    smaller_labels = np.min(array3, axis=2)
-    smaller_labels1 = np.fmin(array1, array2)
-    bigger_labels = np.max(array3, axis=2)
-    bigger_labels1 = np.fmax(array1, array2)
-
-    masked_array1 = np.ma.masked_equal(array1, 0, copy=False)
-    masked_array2 = np.ma.masked_equal(array2, 0, copy=False)
-    #smaller_labels1 = np.fmin(masked_array1, masked_array2)
-
-    array4 = np.dstack((masked_array1, masked_array2))
-    smaller_labels2 = array4.min(axis=2)
-
-    #print(smaller_labels2)
-
-    array2 = np.where(array1 == bigger_labels1, array2, smaller_labels1)
-
-    #print(array2)
-
-    #array1[array1 == bigger_labels] = smaller_labels
-
-    #print(array1)
-
 def main():
-    #cluster_classifier()
     #full_scan()
     packets()
-    #test3()
-    #cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
     
 if __name__ == '__main__':
     main()
