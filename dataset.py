@@ -176,7 +176,6 @@ class LidarDataset(data.Dataset):
             self.meta[item] = []
 
         # uuid example: 000001_instance_0
-        # tee json filu joka sekoittaa luokat
 
         for file in filelist:
             _, category, _, uuid = file.split('/')
@@ -216,8 +215,8 @@ class LidarDataset(data.Dataset):
         point_set = point_set[choice, :]
 
         point_set = point_set - np.expand_dims(np.mean(point_set, axis = 0), 0) # center
-        dist = np.max(np.sqrt(np.sum(point_set ** 2, axis = 1)),0)
-        point_set = point_set / dist #scale
+        #dist = np.max(np.sqrt(np.sum(point_set ** 2, axis = 1)),0)
+        #point_set = point_set / dist #scale
 
         if self.data_augmentation:
             theta = np.random.uniform(0,np.pi*2)
@@ -234,6 +233,69 @@ class LidarDataset(data.Dataset):
             return point_set, cls
         else:
             return point_set, cls
+
+    def __len__(self):
+        return len(self.datapath)
+
+class BoxDataset(data.Dataset):
+    def __init__(self,
+                 root,
+                 npoints=2500,
+                 classification=True,
+                 class_choice=None,
+                 split='train',
+                 data_augmentation=True):
+        self.npoints = npoints
+        self.root = root
+        self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
+        self.cat = {}
+        self.data_augmentation = data_augmentation
+        self.classification = classification
+        
+        with open(self.catfile, 'r') as f:
+            for line in f:
+                ls = line.strip().split()
+                self.cat[ls[0]] = ls[1]
+        
+        if not class_choice is None:
+            self.cat = {k: v for k, v in self.cat.items() if k in class_choice}
+
+        self.id2cat = {v: k for k, v in self.cat.items()}
+
+        self.meta = {}
+        splitfile = os.path.join(self.root, 'train_test_split', 'shuffled_{}_file_list.json'.format(split))
+        
+        filelist = json.load(open(splitfile, 'r'))
+        for item in self.cat:
+            self.meta[item] = []
+
+        # uuid example: 000001_instance_0.pts
+
+        for file in filelist:
+            _, category, _, uuid = file.split('/')
+            i_name, _ = uuid.split('.')
+            if category in self.cat.values():
+                self.meta[self.id2cat[category]].append((os.path.join(self.root, category, 'bbox', i_name+'.txt')))
+
+        self.datapath = []
+        for item in self.cat:
+            for fn in self.meta[item]:
+                self.datapath.append((item, fn))
+
+        self.classes = dict(zip(sorted(self.cat), range(len(self.cat))))
+        print(self.classes)
+
+    def __getitem__(self, index):
+        fn = self.datapath[index]
+        cls = self.classes[self.datapath[index][0]]
+
+        # load bbox
+        bbox = np.loadtxt(fn[1]).astype(np.float32)
+
+        bbox = torch.from_numpy(bbox)
+        cls = torch.from_numpy(np.array([cls]).astype(np.int64))
+
+        return bbox, cls
 
     def __len__(self):
         return len(self.datapath)
@@ -407,6 +469,10 @@ if __name__ == '__main__':
 
     if dataset == 'filter':
         d = FilterDataset(root = datapath, classification = True)
+        ps, cls = d[0]
+
+    if dataset == 'bbox':
+        d = BoxDataset(root = datapath, classification = True)
         ps, cls = d[0]
 
     if dataset == 'modelnet':

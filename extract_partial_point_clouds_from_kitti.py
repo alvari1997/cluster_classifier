@@ -59,16 +59,17 @@ for s in range(1, total_scans):
                 points_canonical, box_canonical = utils.points_to_center(p, box)
                 #points_canonical, box_canonical = utils.points_to_canonical(p, box)
                 #points_canonical, box_canonical = utils.lidar_to_shapenet(points_canonical, box_canonical)
-                pts_name = 'output2/{}/{}_instance_{}'.format(args.category, id, i)
-                pts_name_pts = 'output2/{}/{}_instance_{}.pts'.format(args.category, id, i)
+                #pts_name = 'output3/{}/points/{}_instance_{}'.format(args.category, id, i)
+                pts_name_pts = 'output3/{}/points/{}_instance_{}.pts'.format(args.category, id, i)
                 #pts_name_pts = 'output/outliers/{}_{}_instance_{}.pts'.format(args.category, id, i)
-                box_name = 'output2/{}/{}_bbox_{}'.format(args.category, id, i)
+                #box_name = 'output3/{}/bbox/{}_bbox_{}'.format(args.category, id, i)
+                box_name_box = 'output3/{}/bbox/{}_instance_{}.txt'.format(args.category, id, i)
                 #utils.write_points(points_canonical, pts_name)
                 #utils.write_bboxes(box_canonical, box_name)
 
                 # write to pts file
-                #print(len(p))
                 utils.write_points_pts(points_canonical, pts_name_pts)
+                utils.write_bboxes_box(box_canonical, box_name_box)
 
         #points_is_within_3d_box = np.concatenate(points_is_within_3d_box, axis=0)
         #points = points_is_within_3d_box
