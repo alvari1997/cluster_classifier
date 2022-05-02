@@ -1,9 +1,9 @@
 from __future__ import print_function
 import argparse
-from cProfile import label
-from cv2 import IMWRITE_PAM_FORMAT_GRAYSCALE
+#from cProfile import label
+#from cv2 import IMWRITE_PAM_FORMAT_GRAYSCALE
 import numpy as np
-from sklearn.metrics import accuracy_score
+#from sklearn.metrics import accuracy_score
 import torch
 import torch.nn.parallel
 import torch.utils.data
@@ -13,7 +13,7 @@ from pointnet.custom_models import PointNetCls
 #from pointnet.model import PointNetCls
 import torch.nn.functional as F
 import time
-import open3d as o3d
+#import open3d as o3d
 import matplotlib.pyplot as plt
 import scipy.special as sci
 
@@ -32,7 +32,7 @@ T = 1000
 a = 1
 n = 30
 
-max_i = 100
+max_i = 1000
 
 '''test_dataset = ShapeNetDataset(
     root='shapenetcore_partanno_segmentation_benchmark_v0',
@@ -42,14 +42,15 @@ max_i = 100
     data_augmentation=False)'''
 
 test_dataset = LidarDataset(
-    root='lidar_dataset5',
+    #root='lidar_dataset5',
+    root='unbbox_dataset',
     split='test',
     classification=True,
     npoints=opt.num_points,
     data_augmentation=False)
 
 outlier_dataset = LidarDataset(
-    root='outlier_dataset2',
+    root='un_outlier_dataset_test',
     split='test',
     classification=True,
     npoints=opt.num_points,
@@ -90,14 +91,15 @@ for i, data in enumerate(testdataloader, 0):
     if i > max_i:
         break
 
-    points, target = data
-    points, target = Variable(points), Variable(target[:, 0])
+    points, target, _, dist = data
+    points, target, dist = Variable(points), Variable(target[:, 0]), Variable(dist)
     points = points.transpose(2, 1)
-    points, target = points.cpu(), target.cpu()
+    dist = dist[:, None]
+    points, target, dist = points.cpu(), target.cpu(), dist.cpu().float()
 
     # run PointNet
     start = time.time()
-    pred, global_feat, avg, out = classifier(points)
+    pred, global_feat, avg, out = classifier(points, dist)
     stop = time.time()
     print(stop-start)
     #print(pred)
@@ -176,13 +178,13 @@ for i, data in enumerate(testdataloader, 0):
         pcd.points = o3d.utility.Vector3dVector(np_points)
         o3d.visualization.draw_geometries([pcd])'''
 
-print('accuracy ', np.mean(accuracy_scores))
+'''print('accuracy ', np.mean(accuracy_scores))
 print('time ', np.mean(times))
 print('max score ', np.max(max_scores))
 print('vans accuracy ', correctVans/totalVans)
 print('pedestrian accuracy ', correctPed/totalPed)
 print('cyclists accuracy ', correctCyc/totalCyc)
-print('cars accuracy ', correctCars/totalCars)
+print('cars accuracy ', correctCars/totalCars)'''
 
 testdataloader = torch.utils.data.DataLoader(
     outlier_dataset, batch_size=1, shuffle=True)
@@ -197,13 +199,14 @@ for i, data in enumerate(testdataloader, 0):
         break
 
     start = time.time()
-    points, target = data
-    points, target = Variable(points), Variable(target[:, 0])
+    points, target, _, dist = data
+    points, target, dist = Variable(points), Variable(target[:, 0]), Variable(dist)
     points = points.transpose(2, 1)
-    points, target = points.cpu(), target.cpu()
+    dist = dist[:, None]
+    points, target, dist = points.cpu(), target.cpu(), dist.cpu().float()
 
     # run PointNet
-    pred, global_feat, avg, out = classifier(points)
+    pred, global_feat, avg, out = classifier(points, dist)
     #print(pred)
 
     loss = F.nll_loss(pred, target)
@@ -251,6 +254,9 @@ for i, data in enumerate(testdataloader, 0):
 
 print("ID ", np.mean(last_layer))
 print("OoD ", np.mean(last_layer_outliers))
+
+#np.save(last_layer)
+
 plt.plot(range(len(last_layer)), last_layer, "o", label="In distribution (Car, Person, Cyclist, Van)")
 plt.plot(range(len(last_layer_outliers)), last_layer_outliers, "o", label="Out of distribution (Random clusters)")
 plt.hlines(-2.2, 0, i, colors="Black", linestyles="--", label="Threshold")
@@ -259,5 +265,5 @@ plt.xlabel("Cluster i")
 plt.ylabel("Energy")
 #plt.title("Default training")
 plt.title("Trained with energy loss function")
-plt.ylim(-20, 2)
+plt.ylim(-20, 10)
 plt.show()

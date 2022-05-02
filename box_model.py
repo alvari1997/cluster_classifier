@@ -121,6 +121,7 @@ class BoxNet(nn.Module):
         #    ipdb.set_trace()
         object_pts_xyz_new = points - \
                 center_delta.view(center_delta.shape[0],-1,1).repeat(1,1,points.shape[-1])
+        #object_pts_xyz_new = points
 
         #print(object_pts_xyz_new)
 

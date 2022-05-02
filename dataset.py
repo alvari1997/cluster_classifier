@@ -1,4 +1,6 @@
 from __future__ import print_function
+from cmath import inf
+import dis
 import torch.utils.data as data
 import os
 import os.path
@@ -205,34 +207,44 @@ class LidarDataset(data.Dataset):
 
         # load points
         point_set = np.loadtxt(fn[1], skiprows=1).astype(np.float32)
-
-        #seg = np.loadtxt(fn[2]).astype(np.int64)
-        #print(point_set.shape, seg.shape)
+        original_len = len(point_set)
 
         choice = np.random.choice(len(point_set), self.npoints, replace=True)
-        #choice = np.random.choice(len(seg), self.npoints, replace=True)
-        #resample
-        point_set = point_set[choice, :]
+        point_set = point_set[choice, :] # resample
+        center = np.expand_dims(np.mean(point_set, axis = 0), 0)
 
-        point_set = point_set - np.expand_dims(np.mean(point_set, axis = 0), 0) # center
+        point_set = point_set - center # center, shape(100,3)
         #dist = np.max(np.sqrt(np.sum(point_set ** 2, axis = 1)),0)
         #point_set = point_set / dist #scale
 
+        # world position vector
+        if original_len < self.npoints:
+            dist_from_orig = np.linalg.norm(center) # (1,1)
+        else: 
+            dist_from_orig = 10.0 # (1,1)
+        bins = np.array([0, 30, 50, np.inf]) # m
+        nbin = np.digitize(dist_from_orig, bins, right=True) - 1
+        one_hot_w_pos = np.eye(3)[nbin] # (3,1)
+
         if self.data_augmentation:
             theta = np.random.uniform(0,np.pi*2)
-            rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],[np.sin(theta), np.cos(theta)]])
-            point_set[:,[0,2]] = point_set[:,[0,2]].dot(rotation_matrix) # random rotation
+
+            # add flip on x axis, and random center offset
+            rotation_matrix = np.array([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
+            point_set[:,[0,1]] = point_set[:,[0,1]].dot(rotation_matrix) # random rotation on z-axis
+
+            #xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
+            xyz2 = np.random.uniform(low=-0.2, high=0.2, size=[3])
+       
+            #point_set = np.add(np.multiply(point_set, xyz1), xyz2).astype('float32')
+            point_set = np.add(point_set, xyz2).astype('float32') # random translate
+
             point_set += np.random.normal(0, 0.02, size=point_set.shape) # random jitter
 
-        #seg = seg[choice]
         point_set = torch.from_numpy(point_set)
-        #seg = torch.from_numpy(seg)
         cls = torch.from_numpy(np.array([cls]).astype(np.int64))
 
-        if self.classification:
-            return point_set, cls
-        else:
-            return point_set, cls
+        return point_set, cls, one_hot_w_pos, dist_from_orig
 
     def __len__(self):
         return len(self.datapath)
@@ -275,12 +287,16 @@ class BoxDataset(data.Dataset):
             _, category, _, uuid = file.split('/')
             i_name, _ = uuid.split('.')
             if category in self.cat.values():
-                self.meta[self.id2cat[category]].append((os.path.join(self.root, category, 'bbox', i_name+'.txt')))
+                #self.meta[self.id2cat[category]].append((os.path.join(self.root, category, 'bbox', i_name+'.txt'))),
+
+                self.meta[self.id2cat[category]].append((os.path.join(self.root, category, 'points', uuid),
+                                        os.path.join(self.root, category, 'bbox', i_name+'.txt')))
 
         self.datapath = []
         for item in self.cat:
             for fn in self.meta[item]:
-                self.datapath.append((item, fn))
+                #self.datapath.append((item, fn))
+                self.datapath.append((item, fn[0], fn[1]))
 
         self.classes = dict(zip(sorted(self.cat), range(len(self.cat))))
         print(self.classes)
@@ -289,13 +305,41 @@ class BoxDataset(data.Dataset):
         fn = self.datapath[index]
         cls = self.classes[self.datapath[index][0]]
 
-        # load bbox
-        bbox = np.loadtxt(fn[1]).astype(np.float32)
+        # load points
+        point_set = np.loadtxt(fn[1], skiprows=1).astype(np.float32)
+        choice = np.random.choice(len(point_set), self.npoints, replace=True) # sample
+        point_set = point_set[choice, :]
+        center = np.expand_dims(np.mean(point_set, axis = 0), 0)
 
+        # load bbox
+        bbox = np.loadtxt(fn[2]).astype(np.float32)
+
+        # world position vector
+        dist_from_orig = np.linalg.norm(center) # (1,1)
+        bins = np.array([0, 30, 50, np.inf]) # m
+        nbin = np.digitize(dist_from_orig, bins, right=True) - 1
+        one_hot_w_pos = np.eye(3)[nbin] # (3,1)
+
+        #center
+        point_set = point_set - center
+        bbox[:3] = bbox[:3] - center
+
+        if self.data_augmentation:
+            theta = np.random.uniform(0,np.pi*2)
+            #rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],[np.sin(theta), np.cos(theta)]])
+            #point_set[:,[0,2]] = point_set[:,[0,2]].dot(rotation_matrix) # random rotation
+
+            # add rotation on z axis, flip on x axis, and random center offset
+            #rotation_matrix = np.array([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
+            #point_set[:,[0,1]] = point_set[:,[0,1]].dot(rotation_matrix) # random rotation on z-axis
+
+            point_set += np.random.normal(0, 0.02, size=point_set.shape) # random jitter
+        
+        point_set = torch.from_numpy(point_set)
         bbox = torch.from_numpy(bbox)
         cls = torch.from_numpy(np.array([cls]).astype(np.int64))
 
-        return bbox, cls
+        return point_set, bbox, cls, one_hot_w_pos, dist_from_orig
 
     def __len__(self):
         return len(self.datapath)
@@ -473,7 +517,7 @@ if __name__ == '__main__':
 
     if dataset == 'bbox':
         d = BoxDataset(root = datapath, classification = True)
-        ps, cls = d[0]
+        ps, bbox, cls = d[0]
 
     if dataset == 'modelnet':
         gen_modelnet_id(datapath)

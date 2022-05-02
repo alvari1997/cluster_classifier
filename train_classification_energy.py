@@ -1,5 +1,6 @@
 from __future__ import print_function
 import argparse
+from dis import dis
 import os
 import random
 from socket import MSG_DONTROUTE
@@ -19,7 +20,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     '--batchSize', type=int, default=32, help='input batch size')
 parser.add_argument(
-    '--num_points', type=int, default=100, help='input batch size')
+    '--num_points', type=int, default=100, help='input size')
 parser.add_argument(
     '--workers', type=int, help='number of data loading workers', default=4)
 parser.add_argument(
@@ -27,7 +28,7 @@ parser.add_argument(
 parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--model', type=str, default='', help='model path')
 parser.add_argument('--dataset', type=str, required=True, help="dataset path")
-parser.add_argument('--dataset_type', type=str, default='shapenet', help="dataset type shapenet|modelnet40")
+parser.add_argument('--dataset_type', type=str, default='lidar', help="dataset type lidar|shapenet")
 parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
 
 opt = parser.parse_args()
@@ -54,9 +55,9 @@ if opt.dataset_type == 'lidar':
         data_augmentation=False)
 
     out_dataset = LidarDataset(
-        root='outlier_dataset2',
+        root='un_outlier_dataset_train',
         classification=True,
-        split='test',
+        split='train',
         npoints=opt.num_points,
         data_augmentation=False)
 else:
@@ -111,19 +112,23 @@ for epoch in range(opt.nepoch):
     for data, ood_data in zip(dataloader, outdataloader):
         points = torch.cat((data[0], ood_data[0]), 0)
         target = data[1]
-        #points, target = data
+        one_hot_w_pos = data[2]
+        dist = torch.cat((data[3], ood_data[3]), 0)
+        dist = dist[:, None]
         target = target[:, 0]
         points = points.transpose(2, 1)
-        points, target = points.cuda(), target.cuda()
+        points, target, one_hot_w_pos, dist = points.cuda(), target.cuda(), one_hot_w_pos.cuda(), dist.cuda()
         optimizer.zero_grad()
         classifier = classifier.train()
-        pred, trans, trans_feat, out = classifier(points)
+        pred, trans, trans_feat, out = classifier(points, dist)
         loss = F.cross_entropy(pred[:len(data[0])], target)
         #loss = F.nll_loss(pred, target)
         if opt.feature_transform:
             loss += feature_transform_regularizer(trans_feat) * 0.001
         
         # add energy loss
+        #m_in = -18 
+        #m_out = -2 
         m_in = -5 #winner
         m_out = -2 #winner
         # tried
@@ -141,41 +146,44 @@ for epoch in range(opt.nepoch):
 
         loss.backward()
         optimizer.step()
-        pred_choice = pred.data.max(1)[1]
+        #pred_choice = pred.data.max(1)[1]
+        pred_choice = pred[:len(data[0])].data.max(1)[1]
         #correct = pred_choice.eq(target.data).cpu().sum()
-        correct = pred_choice[0].eq(target.data).cpu().sum()
+        correct = pred_choice.eq(target.data).cpu().sum()
         print('[%d: %d/%d] train loss: %f accuracy: %f' % (epoch, i, num_batch, loss.item(), correct.item() / float(opt.batchSize)))
         #print('[%d: %d/%d] train loss: %f' % (epoch, i, num_batch, loss.item()))
 
         if i % 10 == 0:
             j, data = next(enumerate(testdataloader, 0))
-            points, target = data
+            points, target, _, dist = data
             target = target[:, 0]
             points = points.transpose(2, 1)
-            points, target = points.cuda(), target.cuda()
+            dist = dist[:, None]
+            points, target, dist = points.cuda(), target.cuda(), dist.cuda()
             classifier = classifier.eval()
-            pred, _, _, _ = classifier(points)
+            pred, _, _, _ = classifier(points, dist)
             loss = F.nll_loss(pred, target)
             pred_choice = pred.data.max(1)[1]
-            #correct = pred_choice.eq(target.data).cpu().sum()
-            correct = pred_choice[0].eq(target.data).cpu().sum()
+            correct = pred_choice.eq(target.data).cpu().sum()
+            #correct = pred_choice[0].eq(target.data).cpu().sum()
             print('[%d: %d/%d] %s loss: %f accuracy: %f' % (epoch, i, num_batch, blue('test'), loss.item(), correct.item()/float(opt.batchSize)))
             #print('[%d: %d/%d] %s loss: %f' % (epoch, i, num_batch, blue('test'), loss.item()))
         i = i + 1
 
     torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
-plt.show()
+#plt.show()
 
 total_correct = 0
 total_testset = 0
 for i,data in tqdm(enumerate(testdataloader, 0)):
-    points, target = data
+    points, target, _, dist = data
     target = target[:, 0]
     points = points.transpose(2, 1)
-    points, target = points.cuda(), target.cuda()
+    dist = dist[:, None]
+    points, target, dist = points.cuda(), target.cuda(), dist.cuda()
     classifier = classifier.eval()
-    pred, _, _, _ = classifier(points)
+    pred, _, _, _ = classifier(points, dist)
     pred_choice = pred.data.max(1)[1]
     correct = pred_choice.eq(target.data).cpu().sum()
     total_correct += correct.item()
