@@ -1,4 +1,4 @@
-<mxfile host="app.diagrams.net" modified="2022-05-03T11:50:34.713Z" agent="5.0 (X11)" etag="xv8M6PIPPlXtWRd0luOT" version="17.5.0" type="github">
+<mxfile host="app.diagrams.net" modified="2022-05-03T11:51:25.363Z" agent="5.0 (X11)" etag="j3kK2UmBBYrFvrm1T96b" version="17.5.0" type="github">
   <diagram id="GZbshFFZDwSNXqe_PybA" name="Page-1">
     <mxGraphModel dx="675" dy="397" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="1" shadow="0">
       <root>
@@ -64,7 +64,7 @@
         <mxCell id="Kx8_sQ4NVTLF2Z_cxWmw-22" value="&#39;" style="shape=curlyBracket;whiteSpace=wrap;html=1;rounded=1;flipH=1;fontFamily=Times New Roman;fontSize=14;strokeWidth=1;size=0.5;" parent="1" vertex="1">
           <mxGeometry x="205" y="180" width="20" height="15" as="geometry" />
         </mxCell>
-        <mxCell id="l7Pvp1b1g0So3MUCpbeX-1" value="&lt;div&gt;$$b_s\times n \times 3$$&lt;/div&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
+        <mxCell id="l7Pvp1b1g0So3MUCpbeX-1" value="&lt;div&gt;$$B\times n \times 3$$&lt;/div&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
           <mxGeometry x="325" y="60" width="20" height="140" as="geometry" />
         </mxCell>
         <mxCell id="l7Pvp1b1g0So3MUCpbeX-2" value="&lt;font style=&quot;font-size: 14px&quot; face=&quot;Times New Roman&quot;&gt;Featurizer&lt;/font&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
@@ -90,7 +90,7 @@
         <mxCell id="l7Pvp1b1g0So3MUCpbeX-8" value="&lt;font face=&quot;Times New Roman&quot;&gt;&lt;font size=&quot;3&quot;&gt;R&lt;/font&gt;&lt;/font&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;fillColor=#dae8fc;strokeColor=#6c8ebf;" parent="1" vertex="1">
           <mxGeometry x="293" y="165" width="27" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="l7Pvp1b1g0So3MUCpbeX-9" value="&lt;div&gt;$$b_s\times n \times 3$$&lt;/div&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
+        <mxCell id="l7Pvp1b1g0So3MUCpbeX-9" value="&lt;div&gt;$$B\times n \times 3$$&lt;/div&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
           <mxGeometry x="608" y="60" width="20" height="140" as="geometry" />
         </mxCell>
         <mxCell id="l7Pvp1b1g0So3MUCpbeX-10" value="&lt;font style=&quot;font-size: 14px&quot; face=&quot;Times New Roman&quot;&gt;Featurizer&lt;/font&gt;" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;flipH=1;size=5;horizontal=0;" parent="1" vertex="1">
