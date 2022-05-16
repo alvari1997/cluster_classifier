@@ -32,7 +32,7 @@ T = 1000
 a = 1
 n = 30
 
-max_i = 1000
+max_i = 300
 
 '''test_dataset = ShapeNetDataset(
     root='shapenetcore_partanno_segmentation_benchmark_v0',
@@ -50,7 +50,7 @@ test_dataset = LidarDataset(
     data_augmentation=False)
 
 outlier_dataset = LidarDataset(
-    root='un_outlier_dataset_test',
+    root='un_fov_lim_outlier_dataset_test',
     split='test',
     classification=True,
     npoints=opt.num_points,
@@ -91,17 +91,18 @@ for i, data in enumerate(testdataloader, 0):
     if i > max_i:
         break
 
-    points, target, _, dist = data
+    points, target, _, dist, voxel = data
     points, target, dist = Variable(points), Variable(target[:, 0]), Variable(dist)
     points = points.transpose(2, 1)
     dist = dist[:, None]
-    points, target, dist = points.cpu(), target.cpu(), dist.cpu().float()
+    voxel = voxel[:, :, None]
+    points, target, dist, voxel = points.cpu(), target.cpu(), dist.cpu().float(), voxel.cpu().float()
 
     # run PointNet
     start = time.time()
-    pred, global_feat, avg, out = classifier(points, dist)
+    pred, global_feat, avg, out = classifier(points, dist, voxel)
     stop = time.time()
-    print(stop-start)
+    #print(stop-start)
     #print(pred)
 
     loss = F.nll_loss(pred, target)
@@ -199,14 +200,15 @@ for i, data in enumerate(testdataloader, 0):
         break
 
     start = time.time()
-    points, target, _, dist = data
+    points, target, _, dist, voxel = data
     points, target, dist = Variable(points), Variable(target[:, 0]), Variable(dist)
     points = points.transpose(2, 1)
     dist = dist[:, None]
-    points, target, dist = points.cpu(), target.cpu(), dist.cpu().float()
+    voxel = voxel[:, :, None]
+    points, target, dist, voxel = points.cpu(), target.cpu(), dist.cpu().float(), voxel.cpu().float()
 
     # run PointNet
-    pred, global_feat, avg, out = classifier(points, dist)
+    pred, global_feat, avg, out = classifier(points, dist, voxel)
     #print(pred)
 
     loss = F.nll_loss(pred, target)

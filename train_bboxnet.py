@@ -1,8 +1,10 @@
 from __future__ import print_function
 import argparse
+from dis import dis
 import os
 import random
 from socket import MSG_DONTROUTE
+from sklearn import cluster
 import torch
 import torch.nn.parallel
 import torch.optim as optim
@@ -16,23 +18,64 @@ import matplotlib.pyplot as plt
 import time
 from model_utils import BoxNetLoss, parse_output_to_tensors, get_box3d_corners_helper, get_box3d_corners
 import open3d as o3d
-from provider import angle2class, size2class, class2angle, class2size, from_prediction_to_label_format, compute_box3d_iou, size2class2
+from provider import angle2class, size2class, class2angle, class2size, compute_box3d_iou, size2class2, give_pred_box_corners, get_3d_box
 #from viz_util import draw_lidar, draw_lidar_simple
 
 Loss = BoxNetLoss()
 NUM_HEADING_BIN = 12
-NUM_SIZE_CLUSTER = 3 #8 # one cluster for each type
+NUM_SIZE_CLUSTER = 3 # one cluster for each type
 NUM_OBJECT_POINT = 512
 
+def boxes_to_corners_3d(boxes3d):
+    """
+        7 -------- 4
+       /|         /|
+      6 -------- 5 .
+      | |        | |
+      . 3 -------- 0
+      |/         |/
+      2 -------- 1
+    Args:
+        boxes3d:  (N, 7) [x, y, z, dx, dy, dz, heading], (x, y, z) is the box center
+
+    Returns:
+        corners3d: (N, 8, 3)
+    """
+    template = np.array([
+        [1, 1, -1], [1, -1, -1], [-1, -1, -1], [-1, 1, -1],
+        [1, 1, 1], [1, -1, 1], [-1, -1, 1], [-1, 1, 1],
+    ]) / 2
+
+    corners3d = boxes3d[:, None, 3:6] * template[None, :, :]
+    corners3d = rotate_points_along_z(corners3d, boxes3d[:, 6]).reshape(-1, 8, 3)
+    corners3d += boxes3d[:, None, 0:3]
+    return corners3d
+
+def rotate_points_along_z(points, angle):
+    """
+    Args:
+        points: (B, N, 3)
+        angle: (B), angle along z-axis, angle increases x ==> y
+
+    Returns:
+    """
+    cosa = np.cos(angle)
+    sina = np.sin(angle)
+    ones = np.ones_like(angle, dtype=np.float32)
+    zeros = np.zeros_like(angle, dtype=np.float32)
+    rot_matrix = np.stack((
+        cosa,  sina, zeros,
+        -sina, cosa, zeros,
+        zeros, zeros, ones
+    ), axis=1).reshape(-1, 3, 3)
+    points_rot = np.matmul(points, rot_matrix)
+    return points_rot
+
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--batchSize', type=int, default=32, help='input batch size')
-parser.add_argument(
-    '--num_points', type=int, default=100, help='input size')
-parser.add_argument(
-    '--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument(
-    '--nepoch', type=int, default=250, help='number of epochs to train for')
+parser.add_argument('--batchSize', type=int, default=32, help='input batch size')
+parser.add_argument('--num_points', type=int, default=128, help='input size')
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+parser.add_argument('--nepoch', type=int, default=250, help='number of epochs to train for')
 parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--model', type=str, default='', help='model path')
 parser.add_argument('--dataset', type=str, required=True, help="dataset path")
@@ -49,22 +92,11 @@ random.seed(opt.manualSeed)
 torch.manual_seed(opt.manualSeed)
 
 if opt.dataset_type == 'bbox':
-    dataset = LidarDataset(
-        root=opt.dataset,
-        classification=True,
-        npoints=opt.num_points)
-
-    test_dataset = LidarDataset(
-        root=opt.dataset,
-        classification=True,
-        split='test',
-        npoints=opt.num_points,
-        data_augmentation=False)
-
     box_dataset = BoxDataset(
         root=opt.dataset,
         classification=True,
-        npoints=opt.num_points)
+        npoints=opt.num_points,
+        data_augmentation=True)
 
     test_box_dataset = BoxDataset(
         root=opt.dataset,
@@ -75,23 +107,10 @@ if opt.dataset_type == 'bbox':
 else:
     exit('wrong dataset type')
 
-
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=opt.batchSize,
-    shuffle=False,
-    num_workers=int(opt.workers))
-
-testdataloader = torch.utils.data.DataLoader(
-    test_dataset,
-    batch_size=opt.batchSize,
-    shuffle=True,
-    num_workers=int(opt.workers))
-
 box_dataloader = torch.utils.data.DataLoader(
     box_dataset,
     batch_size=opt.batchSize,
-    shuffle=False,
+    shuffle=True,
     num_workers=int(opt.workers))
 
 testboxdataloader = torch.utils.data.DataLoader(
@@ -100,8 +119,8 @@ testboxdataloader = torch.utils.data.DataLoader(
     shuffle=True,
     num_workers=int(opt.workers))
 
-print(len(dataset), len(box_dataset), len(test_dataset), len(test_box_dataset))
-num_classes = len(dataset.classes)
+print(len(box_dataset), len(test_box_dataset))
+num_classes = len(box_dataset.classes)
 print('classes', num_classes)
 
 try:
@@ -115,23 +134,44 @@ if opt.model != '':
     classifier.load_state_dict(torch.load(opt.model))
 
 
-optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5)
+
+
+optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999),eps=1e-08, weight_decay=0.0)
+
+#scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=20, gamma=0.1)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.1)
+
+
+
+#optimizer = optim.Adam(classifier.parameters(), lr=0.001, betas=(0.9, 0.999))
+#scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.5) 
 classifier.cuda()
 
-num_batch = len(dataset) / opt.batchSize
+num_batch = len(box_dataset) / opt.batchSize
+
+plt.ion()
+figure = plt.figure()
+ax = figure.add_subplot(111)
+idx = []
+test_loss = []
+train_loss = []
+plot1, = ax.plot(idx, test_loss)
+plot2, = ax.plot(idx, train_loss)
+plt.ylim(0, 30)
+plt.xlim(0, 10000)
+plt.xlabel("i")
+plt.ylabel("loss")
+plt.title("loss-iteration")
 
 for epoch in range(opt.nepoch):
     scheduler.step()
-    i = 0
-    for data, box_data in zip(dataloader, box_dataloader): #combine points, target, bbox to single dataloader
-        points = data[0]
-        target = data[1]
-        bbox_target = box_data[0]
+    
+    for i, data in enumerate(box_dataloader, 0):
+        points, bbox_target, target, _, dist, cluster_center, voxel = data
+        points1 = points + cluster_center[:, None]
         target = target[:, 0]
-
-        print(target)
-        #print(bbox_target[:, 3:6])
+        dist = dist[:, None]
+        voxel = voxel[:, :, None]
 
         # transform target scalar to 3x one hot vector
         hot1 = torch.zeros(len(data[0]))
@@ -144,22 +184,21 @@ for epoch in range(opt.nepoch):
         one_hot = one_hot.transpose(1, 0)
 
         points = points.transpose(2, 1)
-        points, target, bbox_target, one_hot = points.cuda(), target.cuda(), bbox_target.cuda(), one_hot.cuda()
+        points, target, bbox_target, one_hot, dist, cluster_center, voxel = points.cuda(), target.cuda(), bbox_target.cuda(), one_hot.cuda(), dist.cuda().float(), cluster_center.cuda(), voxel.cuda().float()
         optimizer.zero_grad()
         classifier = classifier.train()
 
         # NN
-        box_pred, center_delta = classifier(points, one_hot)
+        box_pred, center_delta = classifier(points, one_hot, dist, voxel)
         
         center_boxnet, \
         heading_scores, heading_residual_normalized, heading_residual, \
         size_scores, size_residual_normalized, size_residual = \
                 parse_output_to_tensors(box_pred)
 
-        box3d_center = center_boxnet + center_delta
-        #stage1_center = center_delta + center_delta 
-        stage1_center = center_delta
-        #stage1_center = 0
+        #box3d_center = center_boxnet + center_delta
+        stage1_center = cluster_center + center_delta # original cluster center in the world
+        box3d_center = center_boxnet + stage1_center
 
         # heading_scores (32, 12) which bin is the heading
         # heading_residual (32, 12) residual angle
@@ -184,11 +223,30 @@ for epoch in range(opt.nepoch):
         size_class_label:(32)
         size_residual_label:(32,3)'''
 
-        # compute GT, probably wrong setup
-        box3d_center_label = bbox_target[:,:3] # check if correct
-        angle = bbox_target[:, 6] + 3/2*np.pi
+        # compute GT
+        bbox_target[:,:3] = bbox_target[:,:3] + cluster_center
+        box3d_center_label = bbox_target[:,:3]
+        angle = bbox_target[:, 6]
         heading_class_label, heading_residual_label = angle2class(angle, NUM_HEADING_BIN)
-        size_class_label, size_residual_label = size2class2(bbox_target[:,3:6], target) #sometimes residual size > 3m, target vector wrong, problem is that dataloader shuffles bbox and points differently
+        size_class_label, size_residual_label = size2class2(bbox_target[:,3:6], target) 
+        
+        #print(' ')
+        #print(heading_class_label)
+        #print(heading_scores.data.max(1)[1])
+        #print(heading_residual_label)
+        #print(heading_residual)
+        #print(size_class_label)
+        #print(size_scores.data.max(1)[1])
+        #print(size_residual_label)
+        #scls_onehot = torch.eye(NUM_SIZE_CLUSTER)[size_class_label.long()].cuda()  # 32,8
+        #scls_onehot_repeat = scls_onehot.view(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 1, 3)  # 32,8,3
+        #predicted_size_residual = torch.sum( \
+        #    size_residual * scls_onehot_repeat.cuda(), dim=1)#32,3
+        #print(size_residual_label-predicted_size_residual)
+        #print(size_residual_label-size_residual)
+        #print(box3d_center_label)
+        #print(box3d_center)
+        #print(' ')
 
         # losses
         losses = Loss(box3d_center, box3d_center_label, stage1_center, \
@@ -201,45 +259,78 @@ for epoch in range(opt.nepoch):
 
         loss = losses['total_loss']
 
-        # accuracy
+        # accuracy (FIX: flipped box results in IOU = 0 maybe)
         ioubev, iou3dbox = compute_box3d_iou(box3d_center.cpu().detach().numpy(), heading_scores.cpu().detach().numpy(), \
                     heading_residual.cpu().detach().numpy(), size_scores.cpu().detach().numpy(), size_residual.cpu().detach().numpy(), \
                     box3d_center_label.cpu().detach().numpy(), heading_class_label.cpu().detach().numpy(), \
                     heading_residual_label.cpu().detach().numpy(), size_class_label.cpu().detach().numpy(), \
                     size_residual_label.cpu().detach().numpy())
 
-        '''gt_box_corners = get_box3d_corners_helper(bbox_target[:,:3], bbox_target[:,6], bbox_target[:,3:6])
-        pred_box = get_box3d_corners(box3d_center, heading_residual, size_residual)
-        #pred_box_corners = pred_box[:, 0, 0, :, :]
-        pred_box_corners = pred_box[:, heading_scores.data.max(1)[1], size_scores.data.max(1)[1], :, :]
+        # matplotlib viz
+        pred_box_corners = give_pred_box_corners(box3d_center.cpu().detach().numpy(), heading_scores.cpu().detach().numpy(), \
+                    heading_residual.cpu().detach().numpy(), size_scores.cpu().detach().numpy(), size_residual.cpu().detach().numpy())
+        np_bbox_target = bbox_target.cpu().detach().numpy()
+        gt_corners = boxes_to_corners_3d(np_bbox_target)
 
-        print(pred_box_corners.shape)
+        if i > 0 and epoch == -1:
+            for cc in range(32):
+                fig = plt.figure()
+                ax = fig.add_subplot(111, projection='3d')
 
-        pred_heading_class = heading_scores.data.max(1)[1]
-        pred_heading_residual = heading_residual[:, pred_heading_class][0]
-        pred_size_class = size_scores.data.max(1)[1]
-        pred_size_residual = size_residual[:, pred_size_class][0]
+                np_points = points1.cpu().detach().numpy()
+                pts = np_points[cc]
 
-        #pred_box = from_prediction_to_label_format(box3d_center, pred_heading_class, pred_heading_residual, pred_size_class, pred_size_residual, 0)
-        #pred_box = from_prediction_to_label_format(box3d_center, pred_heading_class, pred_heading_residual, pred_size_class, pred_size_residual, 0)
+                gt_b = gt_corners[cc]  # (8, 3)
+                b = pred_box_corners[cc]
 
-        pred_center = box3d_center
-        pred_heading = class2angle(pred_heading_class, pred_heading_residual, NUM_HEADING_BIN)
-        pred_size = class2size(pred_size_class, pred_size_residual)'''
-        #print(pred_size)
-        #print(pred_heading)
+                ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=5, c='b', lw=0, alpha=1)
 
-        #print(pred_center.shape)
-        #print(pred_heading.shape)
-        #print(pred_size.shape)
-        
-        #pred_box_corners = get_box3d_corners_helper(pred_center, pred_heading, pred_size)
+                for k in range(0, 4):
+                    
+                    xx = 0
+                    yy = 1
+                    zz = 2
 
-        # switch to matplotlib viz
-        '''if i > 710 and epoch == 5:
-            np_pred_box = pred_box_corners.cpu().detach().numpy()
-            np_gt_box = gt_box_corners.cpu().detach().numpy()
-            # Our lines span from points 0 to 1, 1 to 2, 2 to 3, etc...
+                    # pred
+                    i, j = k, (k + 1) % 4
+                    ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                            color='r')
+
+                    i, j = k + 4, (k + 1) % 4 + 4
+                    ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                            color='r')
+
+                    i, j = k, k + 4
+                    ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                            color='r')
+
+                    # gt
+                    i, j = k, (k + 1) % 4
+                    ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                            color='g')
+
+                    i, j = k + 4, (k + 1) % 4 + 4
+                    ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                            color='g')
+
+                    i, j = k, k + 4
+                    ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                            color='g')
+
+                #visual_right_scale(corners3d.reshape(-1, 3), ax)
+                ax.title.set_text('IOU: {}'.format(iou3dbox[cc]))
+                ax.view_init(elev=30., azim=-45)
+                ax.set_box_aspect([1,1,1])
+                #ax.set_xlim3d(-3, 3)
+                #ax.set_ylim3d(-3, 3)
+                #ax.set_zlim3d(-3, 3)
+                ax.set_xlabel('x')
+                ax.set_ylabel('y')
+                ax.set_zlabel('z')
+                plt.show()
+
+
+            '''# Our lines span from points 0 to 1, 1 to 2, 2 to 3, etc...
             lines = [[0, 1], [1, 2], [2, 3], [0, 3],
                     [4, 5], [5, 6], [6, 7], [4, 7],
                     [0, 4], [1, 5], [2, 6], [3, 7]]
@@ -275,13 +366,15 @@ for epoch in range(opt.nepoch):
         
         print('[%d: %d/%d] train loss: %f MIOU: %f' % (epoch, i, num_batch, loss.item(), np.mean(iou3dbox)))
         #print('[%d: %d/%d] train loss: %f' % (epoch, i, num_batch, loss.item()))
+        loss_train = loss.item()
 
         if i % 10 == 0:
-            data, boxdata = next(zip(testdataloader, testboxdataloader))
-            points = data[0]
-            target = data[1]
-            bbox_target = box_data[0]
+            j, data = next(enumerate(testboxdataloader, 0))
+            points, bbox_target, target, _, dist, cluster_center, voxel = data
+            points1 = points + cluster_center[:, None]
             target = target[:, 0]
+            dist = dist[:, None]
+            voxel = voxel[:, :, None]
 
             # transform target scalar to 3x one hot vector
             hot1 = torch.zeros(len(data[0]))
@@ -294,41 +387,127 @@ for epoch in range(opt.nepoch):
             one_hot = one_hot.transpose(1, 0)
 
             points = points.transpose(2, 1)
-            points, target, bbox_target, one_hot = points.cuda(), target.cuda(), bbox_target.cuda(), one_hot.cuda()
-            
-            # NN
+            points, target, bbox_target, one_hot, dist, cluster_center, voxel = points.cuda(), target.cuda(), bbox_target.cuda(), one_hot.cuda(), dist.cuda().float(), cluster_center.cuda(), voxel.cuda().float()
             classifier = classifier.eval()
-            box_pred, _ = classifier(points, one_hot)
 
+            # NN
+            box_pred, center_delta = classifier(points, one_hot, dist, voxel)
+            
             center_boxnet, \
             heading_scores, heading_residual_normalized, heading_residual, \
             size_scores, size_residual_normalized, size_residual = \
                     parse_output_to_tensors(box_pred)
 
-            box3d_center = center_boxnet + center_delta # ???
-            stage1_center = 0 # ???
+            stage1_center = cluster_center + center_delta # original cluster center in the world
+            box3d_center = center_boxnet + stage1_center
 
-            # compute GT
+            # compute GT, probably wrong setup
+            bbox_target[:,:3] = bbox_target[:,:3] + cluster_center
             box3d_center_label = bbox_target[:,:3]
-            heading_class_label, heading_residual_label = angle2class(bbox_target[:, 6], NUM_HEADING_BIN)
-            size_class_label, size_residual_label = size2class2(bbox_target[:,3:6], target)
+            angle = bbox_target[:, 6] #+ 3/2*np.pi
+            heading_class_label, heading_residual_label = angle2class(angle, NUM_HEADING_BIN)
+            size_class_label, size_residual_label = size2class2(bbox_target[:,3:6], target) 
 
-            # loss
+            # losses
             losses = Loss(box3d_center, box3d_center_label, stage1_center, \
-                heading_scores, heading_residual_normalized, \
-                heading_residual, \
-                heading_class_label, heading_residual_label, \
-                size_scores, size_residual_normalized, \
-                size_residual, \
-                size_class_label, size_residual_label)
+                    heading_scores, heading_residual_normalized, \
+                    heading_residual, \
+                    heading_class_label, heading_residual_label, \
+                    size_scores, size_residual_normalized, \
+                    size_residual, \
+                    size_class_label, size_residual_label)
 
             loss = losses['total_loss']
-            print('[%d: %d/%d] %s loss: %f' % (epoch, i, num_batch, blue('test'), loss.item()))
-        i = i + 1
+
+            # accuracy
+            ioubev, iou3dbox = compute_box3d_iou(box3d_center.cpu().detach().numpy(), heading_scores.cpu().detach().numpy(), \
+                        heading_residual.cpu().detach().numpy(), size_scores.cpu().detach().numpy(), size_residual.cpu().detach().numpy(), \
+                        box3d_center_label.cpu().detach().numpy(), heading_class_label.cpu().detach().numpy(), \
+                        heading_residual_label.cpu().detach().numpy(), size_class_label.cpu().detach().numpy(), \
+                        size_residual_label.cpu().detach().numpy())
+
+            # matplotlib viz
+            pred_box_corners = give_pred_box_corners(box3d_center.cpu().detach().numpy(), heading_scores.cpu().detach().numpy(), \
+                        heading_residual.cpu().detach().numpy(), size_scores.cpu().detach().numpy(), size_residual.cpu().detach().numpy())
+            np_bbox_target = bbox_target.cpu().detach().numpy()
+            gt_corners = boxes_to_corners_3d(np_bbox_target)
+
+            if i > 0 and epoch == -1:
+                for cc in range(32):
+                    fig = plt.figure()
+                    ax = fig.add_subplot(111, projection='3d')
+
+                    np_points = points1.cpu().detach().numpy()
+                    pts = np_points[cc]
+
+                    gt_b = gt_corners[cc]  # (8, 3)
+                    b = pred_box_corners[cc]
+
+                    ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=5, c='b', lw=0, alpha=1)
+
+                    for k in range(0, 4):
+                        
+                        xx = 0
+                        yy = 1
+                        zz = 2
+
+                        # pred
+                        i, j = k, (k + 1) % 4
+                        ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                                color='r')
+
+                        i, j = k + 4, (k + 1) % 4 + 4
+                        ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                                color='r')
+
+                        i, j = k, k + 4
+                        ax.plot([b[i, xx], b[j, xx]], [b[i, yy], b[j, yy]], [b[i, zz], b[j, zz]],
+                                color='r')
+
+                        # gt
+                        i, j = k, (k + 1) % 4
+                        ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                                color='g')
+
+                        i, j = k + 4, (k + 1) % 4 + 4
+                        ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                                color='g')
+
+                        i, j = k, k + 4
+                        ax.plot([gt_b[i, xx], gt_b[j, xx]], [gt_b[i, yy], gt_b[j, yy]], [gt_b[i, zz], gt_b[j, zz]],
+                                color='g')
+
+                    #visual_right_scale(corners3d.reshape(-1, 3), ax)
+                    ax.title.set_text('IOU: {}'.format(iou3dbox[cc]))
+                    ax.view_init(elev=30., azim=-45)
+                    ax.set_box_aspect([1,1,1])
+                    #ax.set_xlim3d(-3, 3)
+                    #ax.set_ylim3d(-3, 3)
+                    #ax.set_zlim3d(-3, 3)
+                    ax.set_xlabel('x')
+                    ax.set_ylabel('y')
+                    ax.set_zlabel('z')
+                    plt.show()
+
+            print('[%d: %d/%d] %s loss: %f MIOU: %f' % (epoch, i, num_batch, blue('test'), loss.item(), np.mean(iou3dbox)))
+
+            test_loss.append(loss.item())
+            train_loss.append(loss_train)
+            #loss_list[epoch*791 + i] = loss.item()
+            idx.append(epoch*791 + i)
+            plot1.set_xdata(idx)
+            plot1.set_ydata(test_loss)
+            plot2.set_xdata(idx)
+            plot2.set_ydata(train_loss)
+            figure.canvas.draw()
+            figure.canvas.flush_events()
+            time.sleep(0.01)
+    
+    
 
     torch.save(classifier.state_dict(), '%s/cls_model_%d.pth' % (opt.outf, epoch))
 
-plt.show()
+
 
 '''total_correct = 0
 total_testset = 0

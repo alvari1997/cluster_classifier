@@ -154,7 +154,7 @@ class LidarDataset(data.Dataset):
                  data_augmentation=True):
         self.npoints = npoints
         self.root = root
-        self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
+        self.catfile = os.path.join(self.root, 'synsetoffset2category_no_van.txt')
         self.cat = {}
         self.data_augmentation = data_augmentation
         self.classification = classification
@@ -213,7 +213,8 @@ class LidarDataset(data.Dataset):
         point_set = point_set[choice, :] # resample
         center = np.expand_dims(np.mean(point_set, axis = 0), 0)
 
-        point_set = point_set - center # center, shape(100,3)
+        point_set = point_set - center # center
+
         #dist = np.max(np.sqrt(np.sum(point_set ** 2, axis = 1)),0)
         #point_set = point_set / dist #scale
 
@@ -221,30 +222,69 @@ class LidarDataset(data.Dataset):
         if original_len < self.npoints:
             dist_from_orig = np.linalg.norm(center) # (1,1)
         else: 
-            dist_from_orig = 10.0 # (1,1)
+            dist_from_orig = 20.0 # (1,1)
         bins = np.array([0, 30, 50, np.inf]) # m
         nbin = np.digitize(dist_from_orig, bins, right=True) - 1
         one_hot_w_pos = np.eye(3)[nbin] # (3,1)
 
-        if self.data_augmentation:
-            theta = np.random.uniform(0,np.pi*2)
+        # cylinder voxel position
+        '''center_in_cylindrical = np.zeros((1, 3))
+        center_in_cylindrical[:,0] = np.sqrt(center[:,0]**2 + center[:,1]**2) #radial
+        center_in_cylindrical[:,1] = np.arctan2(center[:,1], center[:,0]) #azimuth, horizontal
+        center_in_cylindrical[:,2] = center[:,2] #z, height'''
 
-            # add flip on x axis, and random center offset
+        # spherical voxel position
+        center_in_spherical = np.zeros((1, 3))
+        center_in_spherical[:,0] = np.sqrt(center[:,0]**2 + center[:,1]**2 + center[:,2]**2) # euclidean from origin 
+        center_in_spherical[:,1] = np.arctan2(center[:,1], center[:,0]) # azimuth, horizontal angle
+        center_in_spherical[:,2] = np.arctan2(np.sqrt(center[:,0]**2 + center[:,1]**2), center[:,2]) # for elevation angle defined from Z-axis down
+
+        # define voxel grid coordinate
+        r_bins = np.linspace(0, 75, 10)
+        a_bins = np.linspace(-(np.pi/4+0.2), np.pi/4+0.2, 10)
+        e_bins = np.linspace(1*np.pi/3, 2*np.pi/3, 10)
+        voxel_coord = np.zeros((1, 3))
+        voxel_coord[:,0] = np.digitize(center_in_spherical[:,0], r_bins).squeeze()
+        voxel_coord[:,1] = np.digitize(center_in_spherical[:,1], a_bins).squeeze()
+        voxel_coord[:,2] = np.digitize(center_in_spherical[:,2], e_bins).squeeze()
+        #print(voxel_coord)
+
+        if self.data_augmentation:
+            #theta = np.random.uniform(-np.pi/6,np.pi/6)
+            #theta = np.random.uniform(0,np.pi*2)theta = np.random.uniform(-np.pi/6,np.pi/6)
+            #cluster_observation_angle = np.arctan(center[:,1]/center[:,0])
+            cluster_observation_angle = center_in_spherical[:,1]
+            theta = np.random.uniform(-(cluster_observation_angle+np.pi/4), np.pi/4-cluster_observation_angle).squeeze()
+            new_observation_angle = cluster_observation_angle + theta
+
+            # rotate
             rotation_matrix = np.array([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
             point_set[:,[0,1]] = point_set[:,[0,1]].dot(rotation_matrix) # random rotation on z-axis
 
+            # flip on x-axis
+            if np.random.random() > 0.5: # 50% chance flipping
+                point_set[:,0] *= -1
+                new_observation_angle *= -1
+
+            # translate
             #xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
             xyz2 = np.random.uniform(low=-0.2, high=0.2, size=[3])
-       
+            dxy = np.random.uniform(low=-0.5, high=0.5, size=[2])
+            dz = np.random.uniform(low=-0.2, high=0.2, size=[1])
+            dxyz = np.hstack((dxy, dz))
             #point_set = np.add(np.multiply(point_set, xyz1), xyz2).astype('float32')
-            point_set = np.add(point_set, xyz2).astype('float32') # random translate
+            point_set = np.add(point_set, dxyz).astype('float32')
 
-            point_set += np.random.normal(0, 0.02, size=point_set.shape) # random jitter
+            # jitter
+            #point_set += np.random.normal(0, 0.02, size=point_set.shape)
+
+            # update voxel coordinate, only azimuth
+            voxel_coord[:,1] = np.digitize(new_observation_angle, a_bins)
 
         point_set = torch.from_numpy(point_set)
         cls = torch.from_numpy(np.array([cls]).astype(np.int64))
 
-        return point_set, cls, one_hot_w_pos, dist_from_orig
+        return point_set, cls, one_hot_w_pos, dist_from_orig, np.squeeze(voxel_coord)
 
     def __len__(self):
         return len(self.datapath)
@@ -259,7 +299,7 @@ class BoxDataset(data.Dataset):
                  data_augmentation=True):
         self.npoints = npoints
         self.root = root
-        self.catfile = os.path.join(self.root, 'synsetoffset2category.txt')
+        self.catfile = os.path.join(self.root, 'category_for_boxnet.txt')
         self.cat = {}
         self.data_augmentation = data_augmentation
         self.classification = classification
@@ -307,6 +347,7 @@ class BoxDataset(data.Dataset):
 
         # load points
         point_set = np.loadtxt(fn[1], skiprows=1).astype(np.float32)
+        original_len = len(point_set)
         choice = np.random.choice(len(point_set), self.npoints, replace=True) # sample
         point_set = point_set[choice, :]
         center = np.expand_dims(np.mean(point_set, axis = 0), 0)
@@ -315,31 +356,78 @@ class BoxDataset(data.Dataset):
         bbox = np.loadtxt(fn[2]).astype(np.float32)
 
         # world position vector
-        dist_from_orig = np.linalg.norm(center) # (1,1)
+        if original_len < self.npoints:
+            dist_from_orig = np.linalg.norm(center) # (1,1)
+        else: 
+            dist_from_orig = 20.0 # (1,1)
         bins = np.array([0, 30, 50, np.inf]) # m
         nbin = np.digitize(dist_from_orig, bins, right=True) - 1
         one_hot_w_pos = np.eye(3)[nbin] # (3,1)
 
-        #center
+        # center
         point_set = point_set - center
         bbox[:3] = bbox[:3] - center
 
+        # spherical voxel position
+        center_in_spherical = np.zeros((1, 3))
+        center_in_spherical[:,0] = np.sqrt(center[:,0]**2 + center[:,1]**2 + center[:,2]**2) # euclidean from origin 
+        center_in_spherical[:,1] = np.arctan2(center[:,1], center[:,0]) # azimuth, horizontal angle
+        center_in_spherical[:,2] = np.arctan2(np.sqrt(center[:,0]**2 + center[:,1]**2), center[:,2]) # for elevation angle defined from Z-axis down
+
+        # define voxel grid coordinate
+        r_bins = np.linspace(0, 75, 10)
+        a_bins = np.linspace(-(np.pi/4+0.2), np.pi/4+0.2, 10)
+        e_bins = np.linspace(1*np.pi/3, 2*np.pi/3, 10)
+        voxel_coord = np.zeros((1, 3))
+        voxel_coord[:,0] = np.digitize(center_in_spherical[:,0], r_bins).squeeze()
+        voxel_coord[:,1] = np.digitize(center_in_spherical[:,1], a_bins).squeeze()
+        voxel_coord[:,2] = np.digitize(center_in_spherical[:,2], e_bins).squeeze()
+        #print(voxel_coord)
+
         if self.data_augmentation:
-            theta = np.random.uniform(0,np.pi*2)
+            #theta = np.random.uniform(-np.pi/6,np.pi/6)
+            #theta = np.random.uniform(0,np.pi*2)
             #rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],[np.sin(theta), np.cos(theta)]])
             #point_set[:,[0,2]] = point_set[:,[0,2]].dot(rotation_matrix) # random rotation
+            cluster_observation_angle = center_in_spherical[:,1]
+            theta = np.random.uniform(-(cluster_observation_angle+np.pi/4), np.pi/4-cluster_observation_angle).squeeze()
+            new_observation_angle = cluster_observation_angle + theta
 
-            # add rotation on z axis, flip on x axis, and random center offset
-            #rotation_matrix = np.array([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
-            #point_set[:,[0,1]] = point_set[:,[0,1]].dot(rotation_matrix) # random rotation on z-axis
+            # rotation on z-axis
+            rotation_matrix = np.array([[np.cos(theta), np.sin(theta)],[-np.sin(theta), np.cos(theta)]])
+            point_set = point_set - bbox[:3]
+            point_set[:,[0,1]] = point_set[:,[0,1]].dot(rotation_matrix) # random rotation on z-axis
+            bbox[6] = bbox[6] + theta
+            point_set = point_set + bbox[:3]
 
-            point_set += np.random.normal(0, 0.02, size=point_set.shape) # random jitter
+            # flip on x-axis
+            if np.random.random() > 0.5: # 50% chance flipping
+                point_set[:,0] *= -1
+                bbox[0] *= -1
+                bbox[6] = np.pi - bbox[6]
+                new_observation_angle *= -1
+
+            # translate
+            #xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
+            #xyz2 = np.random.uniform(low=-1.5, high=1.5, size=[3]) # 0.2
+            dxy = np.random.uniform(low=-0.5, high=0.5, size=[2])
+            dz = np.random.uniform(low=-0.2, high=0.2, size=[1])
+            dxyz = np.hstack((dxy, dz))
+            #point_set = np.add(np.multiply(point_set, xyz1), xyz2).astype('float32')
+            point_set = np.add(point_set, dxyz).astype('float32')
+            bbox[:3] = np.add(bbox[:3], dxyz).astype('float32')
+
+            # jitter
+            #point_set += np.random.normal(0, 0.02, size=point_set.shape)
+
+            # update voxel coordinate, only azimuth
+            voxel_coord[:,1] = np.digitize(new_observation_angle, a_bins)
         
         point_set = torch.from_numpy(point_set)
         bbox = torch.from_numpy(bbox)
         cls = torch.from_numpy(np.array([cls]).astype(np.int64))
 
-        return point_set, bbox, cls, one_hot_w_pos, dist_from_orig
+        return point_set, bbox, cls, one_hot_w_pos, dist_from_orig, np.squeeze(center), np.squeeze(voxel_coord)
 
     def __len__(self):
         return len(self.datapath)

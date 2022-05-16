@@ -8,6 +8,8 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 
+g = 32
+
 class STN3d_small(nn.Module):
     def __init__(self):
         super(STN3d_small, self).__init__()
@@ -51,7 +53,7 @@ class STN3d(nn.Module):
         self.conv1 = torch.nn.Conv1d(3, 64, 1)
         self.conv2 = torch.nn.Conv1d(64, 128, 1)
         self.conv3 = torch.nn.Conv1d(128, 1024, 1)
-        self.fc11 = nn.Linear(1024+3, 1024)
+        self.fc11 = nn.Linear(1024+g, 1024)
         self.fc1 = nn.Linear(1024, 512)
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, 9)
@@ -65,7 +67,7 @@ class STN3d(nn.Module):
         self.bn5 = nn.BatchNorm1d(256)
 
 
-    def forward(self, x, dist):
+    def forward(self, x, dist, voxel):
         batchsize = x.size()[0]
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
@@ -75,7 +77,7 @@ class STN3d(nn.Module):
         x = x.view(-1, 1024) # bs, 1024
 
         # add dist feature
-        x = torch.cat([x, dist],1) # bs, 1027
+        x = torch.cat([x, voxel],1) # bs, 1024+g
         x = F.relu(self.bn11(self.fc11(x))) # bs, 1024
 
         x = F.relu(self.bn4(self.fc1(x)))
@@ -143,9 +145,9 @@ class PointNetfeat(nn.Module):
         if self.feature_transform:
             self.fstn = STNkd(k=64)
 
-    def forward(self, x, dist):
-        n_pts = x.size()[2]
-        trans = self.stn(x, dist)
+    def forward(self, x, dist, voxel):
+        #n_pts = x.size()[2]
+        trans = self.stn(x, dist, voxel)
         x = x.transpose(2, 1)
         x = torch.bmm(x, trans)
         x = x.transpose(2, 1)
@@ -173,11 +175,11 @@ class PointNetfeat(nn.Module):
         x = torch.max(x, 2, keepdim=True)[0]
         x = x.view(-1, 128)
 
-        if self.global_feat:
-            return x, avg, trans_feat
-        else:
-            x = x.view(-1, 128, 1).repeat(1, 1, n_pts)
-            return torch.cat([x, pointfeat], 1), trans, trans_feat
+        #if self.global_feat:
+        return x, avg, trans_feat
+        #else:
+        #    x = x.view(-1, 128, 1).repeat(1, 1, n_pts)
+        #    return torch.cat([x, pointfeat], 1), trans, trans_feat
 
 class FilterFeat(nn.Module):
     def __init__(self, global_feat = True, feature_transform = False):
@@ -230,7 +232,7 @@ class PointNetCls(nn.Module):
         #self.fc2 = nn.Linear(512, 256)
         self.fc11 = nn.Linear(1, 16)
         self.fc22 = nn.Linear(16, 3)
-        self.fc1 = nn.Linear(128+3, 128)
+        self.fc1 = nn.Linear(128+g, 128)
         self.fc3 = nn.Linear(128, k)
         self.dropout = nn.Dropout(p=0.3)
         self.bn1 = nn.BatchNorm1d(128)
@@ -238,16 +240,29 @@ class PointNetCls(nn.Module):
         #self.bn2 = nn.BatchNorm1d(256)
         self.relu = nn.ReLU()
 
-    def forward(self, x, dist):
-        # encode world dist to origin
-        dist = self.fc11(dist)
-        dist = self.fc22(dist) # (bs, 3)
+        
+        self.conv11 = torch.nn.Conv1d(3, 64, 1)
+        self.bn11 = nn.BatchNorm1d(64)
+        self.fc33 = nn.Linear(64, g)
+        self.bn33 = nn.BatchNorm1d(g)
 
-        x, avg, trans_feat = self.feat(x, dist)
+    def forward(self, x, dist, voxel):
+        # encode world dist to origin
+        dist = F.relu(self.fc11(dist))
+        dist = F.relu(self.fc22(dist)) # (bs, 3)
+
+        # encode voxel position
+        voxel = F.relu(self.bn11(self.conv11(voxel)))
+        #voxel = torch.max(voxel, 2, keepdim=True)[0]
+        voxel = voxel.view(-1, 64)
+        voxel = F.relu(self.bn33(self.fc33(voxel)))
+        #print(voxel.shape)
+
+        x, avg, trans_feat = self.feat(x, dist, voxel)
         global_feat = x
 
         # add dist feat
-        x = torch.cat((x, dist), 1)
+        x = torch.cat((x, voxel), 1)
         x = F.relu(self.bn1(self.fc1(x)))
 
         #x = F.relu(self.bn1(self.fc1(x)))

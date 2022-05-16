@@ -17,14 +17,10 @@ import matplotlib.pyplot as plt
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--batchSize', type=int, default=32, help='input batch size')
-parser.add_argument(
-    '--num_points', type=int, default=100, help='input size')
-parser.add_argument(
-    '--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument(
-    '--nepoch', type=int, default=250, help='number of epochs to train for')
+parser.add_argument('--batchSize', type=int, default=32, help='input batch size')
+parser.add_argument('--num_points', type=int, default=128, help='input size')
+parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
+parser.add_argument('--nepoch', type=int, default=250, help='number of epochs to train for')
 parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--model', type=str, default='', help='model path')
 parser.add_argument('--dataset', type=str, required=True, help="dataset path")
@@ -45,7 +41,9 @@ if opt.dataset_type == 'lidar':
     dataset = LidarDataset(
         root=opt.dataset,
         classification=True,
-        npoints=opt.num_points)
+        split='train',
+        npoints=opt.num_points,
+        data_augmentation=True)
 
     test_dataset = LidarDataset(
         root=opt.dataset,
@@ -55,11 +53,11 @@ if opt.dataset_type == 'lidar':
         data_augmentation=False)
 
     out_dataset = LidarDataset(
-        root='un_outlier_dataset_train',
+        root='un_fov_lim_outlier_dataset_train',
         classification=True,
         split='train',
         npoints=opt.num_points,
-        data_augmentation=False)
+        data_augmentation=True)
 else:
     exit('wrong dataset type')
 
@@ -115,12 +113,14 @@ for epoch in range(opt.nepoch):
         one_hot_w_pos = data[2]
         dist = torch.cat((data[3], ood_data[3]), 0)
         dist = dist[:, None]
+        voxel = torch.cat((data[4], ood_data[4]), 0)
+        voxel = voxel[:, :, None]
         target = target[:, 0]
         points = points.transpose(2, 1)
-        points, target, one_hot_w_pos, dist = points.cuda(), target.cuda(), one_hot_w_pos.cuda(), dist.cuda()
+        points, target, one_hot_w_pos, dist, voxel = points.cuda(), target.cuda(), one_hot_w_pos.cuda(), dist.cuda().float(), voxel.cuda().float()
         optimizer.zero_grad()
         classifier = classifier.train()
-        pred, trans, trans_feat, out = classifier(points, dist)
+        pred, trans, trans_feat, out = classifier(points, dist, voxel)
         loss = F.cross_entropy(pred[:len(data[0])], target)
         #loss = F.nll_loss(pred, target)
         if opt.feature_transform:
@@ -155,13 +155,14 @@ for epoch in range(opt.nepoch):
 
         if i % 10 == 0:
             j, data = next(enumerate(testdataloader, 0))
-            points, target, _, dist = data
+            points, target, _, dist, voxel = data
             target = target[:, 0]
             points = points.transpose(2, 1)
             dist = dist[:, None]
-            points, target, dist = points.cuda(), target.cuda(), dist.cuda()
+            voxel = voxel[:, :, None]
+            points, target, dist, voxel = points.cuda(), target.cuda(), dist.cuda().float(), voxel.cuda().float()
             classifier = classifier.eval()
-            pred, _, _, _ = classifier(points, dist)
+            pred, _, _, _ = classifier(points, dist, voxel)
             loss = F.nll_loss(pred, target)
             pred_choice = pred.data.max(1)[1]
             correct = pred_choice.eq(target.data).cpu().sum()
@@ -177,13 +178,14 @@ for epoch in range(opt.nepoch):
 total_correct = 0
 total_testset = 0
 for i,data in tqdm(enumerate(testdataloader, 0)):
-    points, target, _, dist = data
+    points, target, _, dist, voxel = data
     target = target[:, 0]
     points = points.transpose(2, 1)
     dist = dist[:, None]
-    points, target, dist = points.cuda(), target.cuda(), dist.cuda()
+    voxel = voxel[:, :, None]
+    points, target, dist, voxel = points.cuda(), target.cuda(), dist.cuda().float(), voxel.cuda().float()
     classifier = classifier.eval()
-    pred, _, _, _ = classifier(points, dist)
+    pred, _, _, _ = classifier(points, dist, voxel)
     pred_choice = pred.data.max(1)[1]
     correct = pred_choice.eq(target.data).cpu().sum()
     total_correct += correct.item()
