@@ -157,8 +157,8 @@ test_loss = []
 train_loss = []
 plot1, = ax.plot(idx, test_loss)
 plot2, = ax.plot(idx, train_loss)
-plt.ylim(0, 30)
-plt.xlim(0, 10000)
+plt.ylim(0, 10)
+plt.xlim(0, 158200)
 plt.xlabel("i")
 plt.ylabel("loss")
 plt.title("loss-iteration")

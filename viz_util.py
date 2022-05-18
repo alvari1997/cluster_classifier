@@ -116,9 +116,8 @@ def draw_gt_boxes3d(gt_boxes3d, fig, color=(1,1,1), line_width=1, draw_text=True
     #mlab.view(azimuth=180, elevation=70, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991], distance=62.0, figure=fig)
     return fig
 
-
 if __name__=='__main__':
-    pc = np.loadtxt('mayavi/kitti_sample_scan.txt')
-    fig = draw_lidar(pc)
-    mlab.savefig('pc_view.jpg', figure=fig)
+    pc = np.loadtxt('kitti_sample_scan.txt')
+    fig = draw_lidar_simple(pc)
+    #mlab.savefig('pc_view.jpg', figure=fig)
     raw_input()
