@@ -4,7 +4,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 import numpy as np
 import torch
-import ipdb
+#import ipdb
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -19,7 +19,8 @@ NUM_OBJECT_POINT = 512
 
 #g_type2class={'Car':0, 'Van':1, 'Truck':2, 'Pedestrian':3,
 #              'Person_sitting':4, 'Cyclist':5, 'Tram':6, 'Misc':7}
-g_type2class={'Car':0,'Pedestrian':1,'Cyclist':2}
+g_type2class={'Car':0,'Pedestrian':2,'Cyclist':1}
+#g_type2class={'Car':0,'Pedestrian':1,'Cyclist':2}
 g_class2type = {g_type2class[t]:t for t in g_type2class}
 g_type2onehotclass = {'Car': 0, 'Pedestrian': 1, 'Cyclist': 2}
 '''
@@ -89,6 +90,48 @@ def parse_output_to_tensors(box_pred):
         size_residual_normalized.view(bs,NUM_SIZE_CLUSTER,3)#[32,8,3]
     size_residual = size_residual_normalized * \
                      torch.from_numpy(g_mean_size_arr).unsqueeze(0).repeat(bs,1,1).cuda()
+    return center_boxnet,\
+            heading_scores, heading_residual_normalized, heading_residual,\
+            size_scores, size_residual_normalized, size_residual
+
+def parse_output_to_tensors_cpu(box_pred):
+    '''
+    :param box_pred: (bs,59)
+    :param logits: (bs,1024,2)
+    :param mask: (bs,1024)
+    :param stage1_center: (bs,3)
+    :return:
+        center_boxnet:(bs,3)
+        heading_scores:(bs,12)
+        heading_residual_normalized:(bs,12),-1 to 1
+        heading_residual:(bs,12)
+        size_scores:(bs,8)
+        size_residual_normalized:(bs,8)
+        size_residual:(bs,8)
+    '''
+    bs = box_pred.shape[0]
+    # center
+    center_boxnet = box_pred[:, :3]#0:3
+    c = 3
+
+    # heading
+    heading_scores = box_pred[:, c:c + NUM_HEADING_BIN]#3:3+12
+    c += NUM_HEADING_BIN
+    heading_residual_normalized = \
+        box_pred[:, c:c + NUM_HEADING_BIN]#3+12 : 3+2*12
+    heading_residual = \
+        heading_residual_normalized * (np.pi / NUM_HEADING_BIN)
+    c += NUM_HEADING_BIN
+
+    # size
+    size_scores = box_pred[:, c:c + NUM_SIZE_CLUSTER]#3+2*12 : 3+2*12+8
+    c += NUM_SIZE_CLUSTER
+    size_residual_normalized = \
+        box_pred[:, c:c + 3 * NUM_SIZE_CLUSTER].contiguous() #[32,24] 3+2*12+8 : 3+2*12+4*8
+    size_residual_normalized = \
+        size_residual_normalized.view(bs,NUM_SIZE_CLUSTER,3)#[32,8,3]
+    size_residual = size_residual_normalized * \
+                     torch.from_numpy(g_mean_size_arr).unsqueeze(0).repeat(bs,1,1).cpu()
     return center_boxnet,\
             heading_scores, heading_residual_normalized, heading_residual,\
             size_scores, size_residual_normalized, size_residual

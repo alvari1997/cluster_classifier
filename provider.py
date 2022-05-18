@@ -289,21 +289,59 @@ def get_3d_box(box_size, heading_angle, center):
     def roty(t):
         c = np.cos(t)
         s = np.sin(t)
-        return np.array([[c,  0,  s],
+        '''return np.array([[c,  0,  s],
                          [0,  1,  0],
-                         [-s, 0,  c]])
+                         [-s, 0,  c]])'''
+
+        return np.array([[c,  s,  0],
+                         [-s, c,  0],
+                         [0,  0,  1]])
 
     R = roty(heading_angle)
-    l,w,h = box_size
-    x_corners = [l/2,l/2,-l/2,-l/2,l/2,l/2,-l/2,-l/2];
-    y_corners = [h/2,h/2,h/2,h/2,-h/2,-h/2,-h/2,-h/2];
-    z_corners = [w/2,-w/2,-w/2,w/2,w/2,-w/2,-w/2,w/2];
+    #l,w,h = box_size # original
+    l,h,w = box_size
+    x_corners = [l/2,l/2,-l/2,-l/2,l/2,l/2,-l/2,-l/2]
+    y_corners = [h/2,h/2,h/2,h/2,-h/2,-h/2,-h/2,-h/2]
+    z_corners = [w/2,-w/2,-w/2,w/2,w/2,-w/2,-w/2,w/2]
     corners_3d = np.dot(R, np.vstack([x_corners,y_corners,z_corners]))
-    corners_3d[0,:] = corners_3d[0,:] + center[0];
-    corners_3d[1,:] = corners_3d[1,:] + center[1];
-    corners_3d[2,:] = corners_3d[2,:] + center[2];
+    corners_3d[0,:] = corners_3d[0,:] + center[0]
+    corners_3d[1,:] = corners_3d[1,:] + center[1]
+    corners_3d[2,:] = corners_3d[2,:] + center[2]
     corners_3d = np.transpose(corners_3d)
     return corners_3d
+
+def give_pred_box_corners(center_pred,
+                      heading_logits, heading_residuals,
+                      size_logits, size_residuals):
+    ''' 
+    Inputs: (numpy arrrays)
+        center_pred: (B,3)
+        heading_logits: (B,NUM_HEADING_BIN)
+        heading_residuals: (B,NUM_HEADING_BIN)
+        size_logits: (B,NUM_SIZE_CLUSTER)
+        size_residuals: (B,NUM_SIZE_CLUSTER,3)
+    Output:
+        box corners: (B, 8, 3)
+    '''
+    batch_size = heading_logits.shape[0]
+    heading_class = np.argmax(heading_logits, 1) # B
+    heading_residual = np.array([heading_residuals[i,heading_class[i]] \
+        for i in range(batch_size)]) # B,
+    size_class = np.argmax(size_logits, 1) # B
+    size_residual = np.vstack([size_residuals[i,size_class[i],:] \
+        for i in range(batch_size)])
+
+    all_corners_3d = []
+    for i in range(batch_size):
+        heading_angle = -class2angle(heading_class[i],
+            heading_residual[i], NUM_HEADING_BIN)
+        box_size = class2size(size_class[i], size_residual[i])
+        corners_3d = get_3d_box(box_size, heading_angle, center_pred[i])
+        all_corners_3d.append(corners_3d)
+    
+    np_all_corners_3d = np.array(all_corners_3d, dtype=np.float32)
+
+    return np_all_corners_3d
 
 def compute_box3d_iou(center_pred,
                       heading_logits, heading_residuals,
@@ -339,32 +377,118 @@ def compute_box3d_iou(center_pred,
     iou2d_list = [] 
     iou3d_list = [] 
     for i in range(batch_size):
-        heading_angle = class2angle(heading_class[i],
-            heading_residual[i], NUM_HEADING_BIN)
-        box_size = class2size(size_class[i], size_residual[i])
-        corners_3d = get_3d_box(box_size, heading_angle, center_pred[i])
-
         heading_angle_label = class2angle(heading_class_label[i],
             heading_residual_label[i], NUM_HEADING_BIN)
         box_size_label = class2size(size_class_label[i], size_residual_label[i])
         corners_3d_label = get_3d_box(box_size_label,
             heading_angle_label, center_label[i])
 
+        # flip pred box if it gives beter IOU
+        heading_angle = class2angle(heading_class[i],
+            heading_residual[i], NUM_HEADING_BIN)
+        heading_angle_flip = np.pi + class2angle(heading_class[i],
+            heading_residual[i], NUM_HEADING_BIN)
+        box_size = class2size(size_class[i], size_residual[i])
+        corners_3d = get_3d_box(box_size, heading_angle, center_pred[i])
+        corners_3d_flip = get_3d_box(box_size, heading_angle_flip, center_pred[i])
+
         iou_3d, iou_2d = box3d_iou(corners_3d, corners_3d_label) 
-        iou3d_list.append(iou_3d)
-        iou2d_list.append(iou_2d)
+        iou_3d_flip, iou_2d_flip = box3d_iou(corners_3d_flip, corners_3d_label) 
+        
+        if iou_3d > iou_3d_flip:
+            iou3d_list.append(iou_3d)
+            iou2d_list.append(iou_2d)
+        else:
+            iou3d_list.append(iou_3d_flip)
+            iou2d_list.append(iou_2d_flip)
     return np.array(iou2d_list, dtype=np.float32), \
         np.array(iou3d_list, dtype=np.float32)
 
 
-def from_prediction_to_label_format(center, angle_class, angle_res,\
-                                    size_class, size_res, rot_angle):
+def from_prediction_to_label_format_lidar(center, angle_class, angle_res,\
+                                    size_class, size_res):
     ''' Convert predicted box parameters to label format. '''
     l,w,h = class2size(size_class, size_res)
-    ry = class2angle(angle_class, angle_res, NUM_HEADING_BIN) + rot_angle
-    tx,ty,tz = rotate_pc_along_y(np.expand_dims(center,0),-rot_angle).squeeze()
-    ty += h/2.0
+    ry = class2angle(angle_class, angle_res, NUM_HEADING_BIN)
+    tx,ty,tz = center
     return h,w,l,tx,ty,tz,ry
+
+def write_detection_results_lidar(result_dir, id_list, type_list, box2d_list, center_list, \
+                            heading_cls_list, heading_res_list, \
+                            size_cls_list, size_res_list, score_list):
+    ''' Write results to KITTI format label files. '''
+    if result_dir is None: return
+    results = {} # map from idx to list of strings, each string is a line (without \n)
+    for i in range(len(center_list)):
+        idx = id_list[i] # idx is the number of the scan
+        output_str = type_list[i] + " -1 -1 -10 "
+        box2d = box2d_list[i] # for bev detection, leave to zero for now
+        output_str += "%.3f %.3f %.3f %.3f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        h,w,l,tx,ty,tz,ry = from_prediction_to_label_format_lidar(center_list[i],
+            heading_cls_list[i], heading_res_list[i],
+            size_cls_list[i], size_res_list[i])
+        score = score_list[i]
+        output_str += "%.3f %.3f %.3f %.3f %.3f %.3f %.3f %.1f" % (h,w,l,tx,ty,tz,ry, score)
+        if idx not in results: results[idx] = []
+        results[idx].append(output_str)
+
+    # Write TXT files
+    if not os.path.exists(result_dir): os.mkdir(result_dir)
+    output_dir = os.path.join(result_dir, 'pred_lidar')
+    if not os.path.exists(output_dir): os.mkdir(output_dir)
+    for idx in results:
+        pred_filename = os.path.join(output_dir, '%06d.txt'%(idx))
+        fout = open(pred_filename, 'w')
+        for line in results[idx]:
+            fout.write(line+'\n')
+        fout.close() 
+
+def from_prediction_to_label_format_cam(center, angle_class, angle_res,\
+                                    size_class, size_res, V2C, R0):
+    ''' Convert predicted box parameters to label format. '''
+    l,w,h = class2size(size_class, size_res)
+    ry = + np.pi/2 - class2angle(angle_class, angle_res, NUM_HEADING_BIN) 
+
+    center = center[None, :]
+
+    # transform to cam 
+    center_hom = np.hstack((center, np.ones((center.shape[0], 1), dtype=np.float32)))
+    center_rect = np.dot(center_hom, np.dot(V2C.T, R0.T))
+
+    tx,ty,tz = center_rect.squeeze()
+    ty += h/2.0
+
+    return h,w,l,tx,ty,tz,ry
+
+def write_detection_results_cam(result_dir, id_list, type_list, box2d_list, center_list, \
+                            heading_cls_list, heading_res_list, \
+                            size_cls_list, size_res_list, score_list, lidar2cam, R0):
+    ''' Write results to KITTI format label files. '''
+    if result_dir is None: return
+    results = {} # map from idx to list of strings, each string is a line (without \n)
+    for i in range(len(center_list)):
+        idx = id_list[i] # idx is the number of the scan
+        output_str = type_list[i] + " -1 -1 -10 "
+        box2d = box2d_list[i] # for bev detection, leave to zero for now
+        output_str += "%.3f %.3f %.3f %.3f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        h,w,l,tx,ty,tz,ry = from_prediction_to_label_format_cam(center_list[i],
+            heading_cls_list[i], heading_res_list[i],
+            size_cls_list[i], size_res_list[i], lidar2cam, R0)
+        score = score_list[i]
+        output_str += "%.3f %.3f %.3f %.3f %.3f %.3f %.3f %.1f" % (h,w,l,tx,ty,tz,ry, score)
+        if idx not in results: results[idx] = []
+        results[idx].append(output_str)
+
+    # Write TXT files
+    if not os.path.exists(result_dir): os.mkdir(result_dir)
+    output_dir = os.path.join(result_dir, 'pred')
+    if not os.path.exists(output_dir): os.mkdir(output_dir)
+    for idx in results:
+        pred_filename = os.path.join(output_dir, '%06d.txt'%(idx))
+        fout = open(pred_filename, 'w')
+        for line in results[idx]:
+            fout.write(line+'\n')
+        fout.close() 
 
 if __name__=='__main__':
     import mayavi.mlab as mlab 
