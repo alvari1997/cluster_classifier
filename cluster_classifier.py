@@ -85,15 +85,20 @@ def full_scan():
     #lidar_data = sorted(glob.glob('scripts/data3/*.bin'), key=key_func)
     #lidar_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/velodyne/*.bin'.format(sequence_in)), key=key_func)
     lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
-    label_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/labels/*.label'.format(sequence_in)), key=key_func)
+    #lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/velodyne/*.bin'), key=key_func)
+    #label_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/labels/*.label'.format(sequence_in)), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
 
     result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
+    #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/'
 
     pixel_accuracies = []
     IoUs = []
+    total_times = []
 
     for i in range(len(lidar_data)):
+        total_time = 0
+
         Scan.open_scan(lidar_data[i])
 
         # organize points
@@ -140,14 +145,16 @@ def full_scan():
         start = time.time()
         ground_i = custom_functions.groundRemoval(xyz_cyl)[:,:,6] #runtime 3 ms
         stop = time.time()
+        total_time += (stop-start)
         ground_mask = ground_i > 0
 
         # fit plane with RANSAC
         ground_points = xyz[ground_mask]
         all_points = orig_xyz.reshape(-1, 3)
         start = time.time()
-        best_eq, best_inliers = plane.fit(pts=ground_points, all_pts=all_points, thresh=0.2, minPoints=100, maxIteration=10)
+        best_eq, best_inliers = plane.fit(pts=ground_points, all_pts=all_points, thresh=0.15, minPoints=100, maxIteration=100)
         stop = time.time()
+        total_time += (stop-start)
         ground_points_ransac = all_points[best_inliers]
         Scan.set_points(ground_points_ransac)
         ground_i_ransac = Scan.proj_mask
@@ -161,6 +168,7 @@ def full_scan():
         start = time.time()
         instance_label = cluster.Depth_cluster(range_projected.reshape(-1))
         stop = time.time()
+        total_time += (stop-start)
         #print('clustering:', stop-start)
         instance_label = np.asarray(instance_label).reshape(64,512)
 
@@ -251,6 +259,7 @@ def full_scan():
         start = time.time()
         pred, global_feat, avg, out = classifier(nn_input_points, nn_input_dist, nn_input_voxel)
         stop = time.time()
+        total_time += (stop-start)
         #print(stop-start)
         pred_choice = pred.data.max(1)[1]
         
@@ -263,13 +272,12 @@ def full_scan():
         energy = -sci.logsumexp(np_out, axis=1)
 
         # OOD dropout
-        energy_threshold = -4.7 # -4.7
+        energy_threshold = -5.0 # -4.7
         nn_input_points = nn_input_points[energy < energy_threshold, :, :]
         nn_input_dist = nn_input_dist[energy < energy_threshold, :]
         nn_input_voxel = nn_input_voxel[energy < energy_threshold, :]
         cluster_centers = cluster_centers[energy < energy_threshold, :]
         pred_choice = pred_choice[energy < energy_threshold]
-        print('amount of IDs: ', np.count_nonzero(energy < energy_threshold))
 
         # transform target scalar to 3x one hot vector
         hot1 = torch.zeros(np.count_nonzero(energy < energy_threshold))
@@ -283,7 +291,10 @@ def full_scan():
 
         if (nn_input_points.shape[0] > 0):
             # boxnet (bug: if batch size = 0 -> boxnet crashes)
+            start = time.time()
             box_pred, center_delta = box_estimator(nn_input_points, one_hot, nn_input_dist, nn_input_voxel)
+            stop = time.time()
+            total_time += (stop-start)
 
             # parse output
             center_boxnet, \
@@ -324,7 +335,7 @@ def full_scan():
             if result_dir is None: return
             results = {} # map from idx to list of strings, each string is a line (without \n)
             idx = i # idx is the number of the scan
-            output_str = "DontCare -1 -1 -10 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1"
+            output_str = "DontCare -1.00 -1 -10.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 1.00"
             if idx not in results: results[idx] = []
             results[idx].append(output_str)
 
@@ -353,9 +364,13 @@ def full_scan():
         #print('mean pixel accuracy:', np.mean(pixel_accuracies))
         #print('mIoU:', np.mean(IoUs))
         #print(int(i/len(lidar_data)*100), '%')
+        print('amount of IDs: ', np.count_nonzero(energy < energy_threshold))
+        print('index: ', i)
+        #total_times.append(1/total_time)
+        #print('FPS: ', np.mean(total_times))
 
         # visualize
-        normed2 = cv2.normalize(instance_label, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        '''normed2 = cv2.normalize(instance_label, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color2 = cv2.applyColorMap(normed2, cv2.COLORMAP_JET)
         scale_percent = 300 # percent of original size
         width = int(color2.shape[1] * scale_percent / 100)
@@ -363,7 +378,7 @@ def full_scan():
         dim = (width, height)
         color2 = cv2.resize(color2, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow("test", color2)
-        cv2.waitKey(500)
+        cv2.waitKey(100)'''
 
 def packets():
     Scan = LaserScan(project=True, flip_sign=False, H=args.range_y, W=args.range_x, fov_up=3.0, fov_down=-25.0)
