@@ -163,7 +163,7 @@ def draw_lidar(
     bgcolor=(0, 0, 0),
     pts_scale=0.3,
     pts_mode="sphere",
-    pts_color=None,
+    pts_color=(1,1,1),
     color_by_intensity=False,
     pc_label=False,
 ):
@@ -203,7 +203,7 @@ def draw_lidar(
     )
 
     # draw origin
-    mlab.points3d(0, 0, 0, color=(1, 1, 1), mode="sphere", scale_factor=0.2)
+    '''mlab.points3d(0, 0, 0, color=(1, 1, 1), mode="sphere", scale_factor=0.2)
 
     # draw axis
     axes = np.array(
@@ -233,7 +233,7 @@ def draw_lidar(
         color=(0, 0, 1),
         tube_radius=None,
         figure=fig,
-    )
+    )'''
 
     '''# draw fov (todo: update to real sensor spec.)
     fov = np.array(
@@ -309,13 +309,14 @@ def draw_lidar(
     )'''
 
     # mlab.orientation_axes()
-    mlab.view(
+    '''mlab.view(
         azimuth=180,
         elevation=70,
         focalpoint=[12.0909996, -1.04700089, -2.03249991],
         distance=62.0,
         figure=fig,
-    )
+    )'''
+    mlab.view(azimuth=180, elevation=70, focalpoint=[19.0, 0.0, -2.0], distance=32.0, figure=fig)
     return fig
 
 
@@ -391,7 +392,7 @@ def draw_gt_boxes3d(
                 figure=fig,
             )
     # mlab.show(1)
-    # mlab.view(azimuth=180, elevation=70, focalpoint=[ 12.0909996 , -1.04700089, -2.03249991], distance=62.0, figure=fig)
+    mlab.view(azimuth=180, elevation=70, focalpoint=[19.0, 0.0, -2.0], distance=32.0, figure=fig)
     return fig
 
 
@@ -584,7 +585,7 @@ def show_lidar_with_boxes(
             print("box3d_pts_3d_velo:")
             print(box3d_pts_3d_velo)
 
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color)
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, text_scale=(0.5,0.5,0.5) ,label=obj.type)
 
             # Draw depth
             '''if depth is not None:
@@ -649,34 +650,40 @@ def key_func(x):
 if __name__ == "__main__":
     #pc = np.loadtxt("kitti_sample_scan.txt")
 
-    lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
+    '''lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
     label_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/label_2/*.txt'), key=key_func)
-    pred_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/pred/*.txt'), key=key_func)
+    pred_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/pred/*.txt'), key=key_func)'''
 
     '''lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/velodyne/*.bin'), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/calib/*.txt'), key=key_func)
     pred_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/pred/*.txt'), key=key_func)'''
 
+    lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/velodyne_points/data/*.bin'), key=key_func)
+    calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
+    pred_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/pred/*.txt'), key=key_func)
+
     Scan = LaserScan(project=True, flip_sign=False, H=64, W=2048, fov_up=3.0, fov_down=-25.0)
-    i = 942
-    Scan.open_scan(lidar_data[i])
-    xyz_list = Scan.points
-    #fig = draw_lidar(xyz_list)
+    for i in range(len(pred_data)):
+        #i = 60
+        Scan.open_scan(lidar_data[i])
+        xyz_list = Scan.points
+        #fig = draw_lidar(xyz_list)
 
-    #dataset = kitti_object(root_dir, split=args.split, args=args)
-    #pc_velo = dataset.get_lidar(data_idx, dtype, n_vec)[:, 0:n_vec]
-    #calib = dataset.get_calibration(data_idx)
+        #dataset = kitti_object(root_dir, split=args.split, args=args)
+        #pc_velo = dataset.get_lidar(data_idx, dtype, n_vec)[:, 0:n_vec]
+        #calib = dataset.get_calibration(data_idx)
 
-    pc_velo = xyz_list
-    calibration = kitti_util.Calibration(calib_data[i])
-    labels = kitti_util.read_label(label_data[i])
-    #is_exist = os.path.exists(pred_data[i])
-    #    if is_exist:
-            #return utils.read_label(pred_filename)
-    pred_obj = kitti_util.read_label(pred_data[i])
+        pc_velo = xyz_list
+        calibration = kitti_util.Calibration(calib_data[i])
+        labels = kitti_util.read_label(pred_data[i])
+        #is_exist = os.path.exists(pred_data[i])
+        #    if is_exist:
+                #return utils.read_label(pred_filename)
+        #pred_obj = kitti_util.read_label(pred_data[i])
 
-    fig = show_lidar_with_boxes(pc_velo, objects=labels, calib=calibration, img_fov=True, img_width=1380, img_height=512, objects_pred=pred_obj, depth=None, cam_img=None)
+        fig = show_lidar_with_boxes(pc_velo, objects=labels, calib=calibration, img_fov=True, img_width=1380, img_height=512, objects_pred=None, depth=None, cam_img=None)
 
-    #mlab.savefig("pc_view.jpg", figure=fig)
-    raw_input()
+        mlab.savefig("images2/pc_view{}.jpg".format(i), figure=fig)
+        mlab.close(all=True)
+        #raw_input()

@@ -20,10 +20,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--batchSize', type=int, default=32, help='input batch size')
 parser.add_argument('--num_points', type=int, default=128, help='input size')
 parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-parser.add_argument('--nepoch', type=int, default=250, help='number of epochs to train for')
+parser.add_argument('--nepoch', type=int, default=200, help='number of epochs to train for')
 parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--model', type=str, default='', help='model path')
-parser.add_argument('--dataset', type=str, required=True, help="dataset path")
+parser.add_argument('--dataset', type=str, required=False, help="dataset path")
 parser.add_argument('--dataset_type', type=str, default='lidar', help="dataset type lidar|shapenet")
 parser.add_argument('--feature_transform', action='store_true', help="use feature transform")
 
@@ -39,21 +39,24 @@ torch.manual_seed(opt.manualSeed)
 
 if opt.dataset_type == 'lidar':
     dataset = LidarDataset(
-        root=opt.dataset,
+        #root=opt.dataset,
+        root='train_unbbox_dataset',
         classification=True,
         split='train',
         npoints=opt.num_points,
         data_augmentation=True)
 
     test_dataset = LidarDataset(
-        root=opt.dataset,
+        #root=opt.dataset,
+        root='test_unbbox_dataset',
         classification=True,
         split='test',
         npoints=opt.num_points,
         data_augmentation=False)
 
     out_dataset = LidarDataset(
-        root='un_fov_lim_outlier_dataset_train',
+        #root='un_fov_lim_outlier_dataset_train',
+        root='train_unood_dataset',
         classification=True,
         split='train',
         npoints=opt.num_points,

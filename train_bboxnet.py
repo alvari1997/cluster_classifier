@@ -1,5 +1,6 @@
 from __future__ import print_function
 import argparse
+from cProfile import label
 from dis import dis
 import os
 import random
@@ -78,7 +79,7 @@ parser.add_argument('--workers', type=int, help='number of data loading workers'
 parser.add_argument('--nepoch', type=int, default=250, help='number of epochs to train for')
 parser.add_argument('--outf', type=str, default='cls', help='output folder')
 parser.add_argument('--model', type=str, default='', help='model path')
-parser.add_argument('--dataset', type=str, required=True, help="dataset path")
+parser.add_argument('--dataset', type=str, required=False, help="dataset path")
 parser.add_argument('--dataset_type', type=str, default='bbox', help="dataset type bbox|lidar")
 
 opt = parser.parse_args()
@@ -93,13 +94,15 @@ torch.manual_seed(opt.manualSeed)
 
 if opt.dataset_type == 'bbox':
     box_dataset = BoxDataset(
-        root=opt.dataset,
+        #root=opt.dataset,
+        root='train_unbbox_dataset',
         classification=True,
         npoints=opt.num_points,
         data_augmentation=True)
 
     test_box_dataset = BoxDataset(
-        root=opt.dataset,
+        #root=opt.dataset,
+        root='test_unbbox_dataset',
         classification=True,
         split='test',
         npoints=opt.num_points,
@@ -155,12 +158,13 @@ ax = figure.add_subplot(111)
 idx = []
 test_loss = []
 train_loss = []
-plot1, = ax.plot(idx, test_loss)
-plot2, = ax.plot(idx, train_loss)
+plot1, = ax.plot(idx, test_loss, label='test')
+plot2, = ax.plot(idx, train_loss, label='train')
 plt.ylim(0, 10)
 plt.xlim(0, 158200)
 plt.xlabel("i")
 plt.ylabel("loss")
+plt.legend(loc="lower left")
 plt.title("loss-iteration")
 
 for epoch in range(opt.nepoch):

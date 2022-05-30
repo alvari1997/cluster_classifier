@@ -22,7 +22,7 @@ import scipy.special as sci
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--model', type=str, default = '',  help='model path')
-parser.add_argument('--num_points', type=int, default=100, help='input batch size')
+parser.add_argument('--num_points', type=int, default=128, help='input batch size')
 
 
 opt = parser.parse_args()
@@ -34,23 +34,16 @@ n = 30
 
 max_i = 300
 
-'''test_dataset = ShapeNetDataset(
-    root='shapenetcore_partanno_segmentation_benchmark_v0',
-    split='test',
-    classification=True,
-    npoints=opt.num_points,
-    data_augmentation=False)'''
-
 test_dataset = LidarDataset(
     #root='lidar_dataset5',
-    root='unbbox_dataset',
+    root='test_unbbox_dataset',
     split='test',
     classification=True,
     npoints=opt.num_points,
     data_augmentation=False)
 
 outlier_dataset = LidarDataset(
-    root='un_fov_lim_outlier_dataset_test',
+    root='test_unood_dataset',
     split='test',
     classification=True,
     npoints=opt.num_points,
@@ -259,7 +252,7 @@ print("OoD ", np.mean(last_layer_outliers))
 
 #np.save(last_layer)
 
-plt.plot(range(len(last_layer)), last_layer, "o", label="In distribution (Car, Person, Cyclist, Van)")
+plt.plot(range(len(last_layer)), last_layer, "o", label="In distribution (Car, Person, Cyclist)")
 plt.plot(range(len(last_layer_outliers)), last_layer_outliers, "o", label="Out of distribution (Random clusters)")
 plt.hlines(-2.2, 0, i, colors="Black", linestyles="--", label="Threshold")
 plt.legend(loc="lower left")
