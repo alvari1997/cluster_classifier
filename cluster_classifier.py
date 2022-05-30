@@ -58,13 +58,13 @@ n_points = 128
 # classifier setup
 classifier = PointNetCls(k=3)
 classifier.cpu()
-classifier.load_state_dict(torch.load('cls_w_128p_voxel.pth'))
+classifier.load_state_dict(torch.load('cls_new_data_128p_voxel.pth'))
 classifier.eval()
 
 # box estimator setup
 box_estimator = BoxNet(n_classes=3, n_channel=3)
 box_estimator.cpu()
-box_estimator.load_state_dict(torch.load('box_w_128p_voxel.pth'))
+box_estimator.load_state_dict(torch.load('box_w_newdata.pth'))
 box_estimator.eval()
 
 def key_func(x):
@@ -84,19 +84,22 @@ def full_scan():
     #load data
     #lidar_data = sorted(glob.glob('scripts/data3/*.bin'), key=key_func)
     #lidar_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/velodyne/*.bin'.format(sequence_in)), key=key_func)
-    lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
+    #lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
     #lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/velodyne/*.bin'), key=key_func)
+    lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/velodyne_points/data/*.bin'), key=key_func)
     #label_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/labels/*.label'.format(sequence_in)), key=key_func)
+    #calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
 
-    result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
+    #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
     #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/'
+    result_dir = '/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/'
 
     pixel_accuracies = []
     IoUs = []
     total_times = []
 
-    for i in range(len(lidar_data)):
+    for i in range(0, len(lidar_data)):
         total_time = 0
 
         Scan.open_scan(lidar_data[i])
@@ -272,12 +275,13 @@ def full_scan():
         energy = -sci.logsumexp(np_out, axis=1)
 
         # OOD dropout
-        energy_threshold = -5.0 # -4.7
+        energy_threshold = -4.9 # -4.7
         nn_input_points = nn_input_points[energy < energy_threshold, :, :]
         nn_input_dist = nn_input_dist[energy < energy_threshold, :]
         nn_input_voxel = nn_input_voxel[energy < energy_threshold, :]
         cluster_centers = cluster_centers[energy < energy_threshold, :]
         pred_choice = pred_choice[energy < energy_threshold]
+        energy = energy[energy < energy_threshold]
 
         # transform target scalar to 3x one hot vector
         hot1 = torch.zeros(np.count_nonzero(energy < energy_threshold))
@@ -319,7 +323,8 @@ def full_scan():
             scls_onehot = np.eye(NUM_SIZE_CLUSTER)[size_cls_list]
             scls_onehot_repeat = scls_onehot.reshape(-1, NUM_SIZE_CLUSTER, 1).repeat(1, 2)
             size_res_list = np.sum(size_residual.detach().numpy() * scls_onehot_repeat, axis=1)
-            score_list = np.ones((len(type_list)))
+            score_list1 = np.clip(-energy+energy_threshold, 0.01, 3) #np.ones((len(type_list)))
+            score_list = (score_list1-0.01)/3 #np.random.uniform(low=0.01, high=1.00, size=(len(type_list),))
 
             # in lidar coordinates
             write_predictions = write_detection_results_lidar(result_dir, id_list, type_list, box2d_list, center_list, \
@@ -378,7 +383,7 @@ def full_scan():
         dim = (width, height)
         color2 = cv2.resize(color2, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow("test", color2)
-        cv2.waitKey(100)'''
+        cv2.waitKey(1000)'''
 
 def packets():
     Scan = LaserScan(project=True, flip_sign=False, H=args.range_y, W=args.range_x, fov_up=3.0, fov_down=-25.0)
@@ -649,10 +654,22 @@ def packets():
     # precision: 0.841 
 
 def main():
-    #lidar_data = sorted(glob.glob('scripts/test_data/*.bin'), key=key_func)
-    #Scan = LaserScan(project=True, flip_sign=False, H=args.range_y, W=args.range_x, fov_up=3.0, fov_down=-25.0)
-    #Scan.open_scan(lidar_data[0])
-    #print(Scan.points)
+    '''lidar_data = sorted(glob.glob('scripts/test_data/*.bin'), key=key_func)
+    Scan = LaserScan(project=True, flip_sign=False, H=16, W=2048, fov_up=15.0, fov_down=-15.0)
+    for i in range(len(lidar_data)):
+        Scan.open_scan(lidar_data[i])
+        print(Scan.points.shape)
+        range_img = Scan.proj_range
+        normed2 = cv2.normalize(range_img, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        color2 = cv2.applyColorMap(normed2, cv2.COLORMAP_JET)
+        scale_percent = 1200 # percent of original size
+        width = int(color2.shape[1]* 0.8)
+        height = int(color2.shape[0] * scale_percent / 100)
+        dim = (width, height)
+        color2 = cv2.resize(color2, dim, interpolation = cv2.INTER_AREA)
+        cv2.imshow("test", color2)
+        cv2.waitKey(100)'''
+
     full_scan()
     #packets()
     cv2.destroyAllWindows()
