@@ -98,7 +98,7 @@ if opt.dataset_type == 'bbox':
         root='train_unbbox_dataset',
         classification=True,
         npoints=opt.num_points,
-        data_augmentation=True)
+        data_augmentation=False)
 
     test_box_dataset = BoxDataset(
         #root=opt.dataset,

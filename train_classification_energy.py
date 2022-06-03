@@ -44,7 +44,7 @@ if opt.dataset_type == 'lidar':
         classification=True,
         split='train',
         npoints=opt.num_points,
-        data_augmentation=True)
+        data_augmentation=False)
 
     test_dataset = LidarDataset(
         #root=opt.dataset,
@@ -60,7 +60,7 @@ if opt.dataset_type == 'lidar':
         classification=True,
         split='train',
         npoints=opt.num_points,
-        data_augmentation=True)
+        data_augmentation=False)
 else:
     exit('wrong dataset type')
 

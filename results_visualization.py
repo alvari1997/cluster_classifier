@@ -585,7 +585,7 @@ def show_lidar_with_boxes(
             print("box3d_pts_3d_velo:")
             print(box3d_pts_3d_velo)
 
-            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, text_scale=(0.5,0.5,0.5) ,label=obj.type)
+            draw_gt_boxes3d([box3d_pts_3d_velo], fig=fig, color=color, text_scale=(0.4,0.4,0.4) ,label=str(obj.score))
 
             # Draw depth
             '''if depth is not None:
@@ -661,11 +661,16 @@ if __name__ == "__main__":
 
     lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/velodyne_points/data/*.bin'), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
-    pred_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/pred/*.txt'), key=key_func)
+    #pred_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/pred/*.txt'), key=key_func)
+    pred_data = sorted(glob.glob('/home/alvari/Desktop/pred/*.txt'), key=key_func)
+
+    '''lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_28/2011_09_28_drive_0016_sync/velodyne_points/data/*.bin'), key=key_func)
+    calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
+    pred_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_28/2011_09_28_drive_0016_sync/pred/*.txt'), key=key_func)'''
 
     Scan = LaserScan(project=True, flip_sign=False, H=64, W=2048, fov_up=3.0, fov_down=-25.0)
     for i in range(len(pred_data)):
-        #i = 60
+        #i = 51
         Scan.open_scan(lidar_data[i])
         xyz_list = Scan.points
         #fig = draw_lidar(xyz_list)
@@ -684,6 +689,6 @@ if __name__ == "__main__":
 
         fig = show_lidar_with_boxes(pc_velo, objects=labels, calib=calibration, img_fov=True, img_width=1380, img_height=512, objects_pred=None, depth=None, cam_img=None)
 
-        mlab.savefig("images2/pc_view{}.jpg".format(i), figure=fig)
+        mlab.savefig("images6/pc_view{}.jpg".format(i), figure=fig)
         mlab.close(all=True)
         #raw_input()

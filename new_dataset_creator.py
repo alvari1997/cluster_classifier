@@ -61,6 +61,8 @@ b = 0
 
 min_points = 10
 
+split = 'train'
+
 # ground segmentation setup
 plane = plane_fit.Plane()
 
@@ -93,18 +95,20 @@ def full_scan():
     label_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/label_2/*.txt'), key=key_func)
 
 
-    result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
+    #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
     #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/'
 
     centers = np.zeros((1, 3))
 
-    for i in range(len(lidar_data)-1000, len(lidar_data)):
+    for i in range(0, len(lidar_data)-1000):
         total_time = 0
 
         Scan.open_scan(lidar_data[i])
         calib = Calibration(calib_data[i])
         car_bboxes = label_box_utils.load_3d_boxes(label_data[i], 'car')
+        van_bboxes = label_box_utils.load_3d_boxes(label_data[i], 'van')
         ped_bboxes = label_box_utils.load_3d_boxes(label_data[i], 'pedestrian')
+        ped_sitting_bboxes = label_box_utils.load_3d_boxes(label_data[i], 'person_sitting')
         cyc_bboxes = label_box_utils.load_3d_boxes(label_data[i], 'cyclist')
 
         #centers.append(car_bboxes[:,:3])
@@ -175,6 +179,62 @@ def full_scan():
         #print(range_unprojected.shape)
 
         # collect IDs if they exist
+        if len(ped_sitting_bboxes != 0):
+            ped_sitting_bboxes = calib.bbox_rect_to_lidar(ped_sitting_bboxes)
+            corners3d = label_box_utils.boxes_to_corners_3d(ped_sitting_bboxes)
+            points_flag = label_box_utils.is_within_3d_box(xyz_unprojected, corners3d)
+
+            for c_i in range(len(points_flag)):
+                gt_p = xyz_unprojected[points_flag[c_i]]
+                #xyz_unprojected[points_flag[c_i]] = [0, 0, 0]
+                #range_unprojected[points_flag[c_i]] = 0
+                overlapping_clusters = instance_label[points_flag[c_i]]
+                #print(np.max(overlapping_cluster_idx))
+                #print(np.min(overlapping_cluster_idx))
+                if len(overlapping_clusters) == 0: continue
+                biggest_cluster_inside_box = np.bincount(overlapping_clusters).argmax()
+                idx_biggest_cluster_inside_box = np.where(overlapping_clusters == biggest_cluster_inside_box)
+                pp = gt_p[idx_biggest_cluster_inside_box]
+                xyz_unprojected[points_flag[c_i]] = [0, 0, 0]
+                range_unprojected[points_flag[c_i]] = 0
+                instance_label[points_flag[c_i]] = 0
+                if len(pp) > min_points:
+                    box = ped_sitting_bboxes[c_i]
+                    pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'ped_sitting', i, c_i)
+                    box_name_box = '{}_dataset/{}/bbox/{}_instance_{}.txt'.format(split, 'ped_sitting', i, c_i)
+                    # write to pts file
+                    label_box_utils.write_points_pts(pp, pts_name_pts)
+                    label_box_utils.write_bboxes_box(box, box_name_box)
+
+        # collect IDs if they exist
+        if len(van_bboxes != 0):
+            van_bboxes = calib.bbox_rect_to_lidar(van_bboxes)
+            corners3d = label_box_utils.boxes_to_corners_3d(van_bboxes)
+            points_flag = label_box_utils.is_within_3d_box(xyz_unprojected, corners3d)
+
+            for c_i in range(len(points_flag)):
+                gt_p = xyz_unprojected[points_flag[c_i]]
+                #xyz_unprojected[points_flag[c_i]] = [0, 0, 0]
+                #range_unprojected[points_flag[c_i]] = 0
+                overlapping_clusters = instance_label[points_flag[c_i]]
+                #print(np.max(overlapping_cluster_idx))
+                #print(np.min(overlapping_cluster_idx))
+                if len(overlapping_clusters) == 0: continue
+                biggest_cluster_inside_box = np.bincount(overlapping_clusters).argmax()
+                idx_biggest_cluster_inside_box = np.where(overlapping_clusters == biggest_cluster_inside_box)
+                pp = gt_p[idx_biggest_cluster_inside_box]
+                xyz_unprojected[points_flag[c_i]] = [0, 0, 0]
+                range_unprojected[points_flag[c_i]] = 0
+                instance_label[points_flag[c_i]] = 0
+                if len(pp) > min_points:
+                    box = van_bboxes[c_i]
+                    pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'vans', i, c_i)
+                    box_name_box = '{}_dataset/{}/bbox/{}_instance_{}.txt'.format(split, 'vans', i, c_i)
+                    # write to pts file
+                    label_box_utils.write_points_pts(pp, pts_name_pts)
+                    label_box_utils.write_bboxes_box(box, box_name_box)
+
+        # collect IDs if they exist
         if len(car_bboxes != 0):
             car_bboxes = calib.bbox_rect_to_lidar(car_bboxes)
             corners3d = label_box_utils.boxes_to_corners_3d(car_bboxes)
@@ -196,8 +256,8 @@ def full_scan():
                 instance_label[points_flag[c_i]] = 0
                 if len(pp) > min_points:
                     box = car_bboxes[c_i]
-                    pts_name_pts = 'test_dataset/{}/points/{}_instance_{}.pts'.format('cars', i, c_i)
-                    box_name_box = 'test_dataset/{}/bbox/{}_instance_{}.txt'.format('cars', i, c_i)
+                    pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'cars', i, c_i)
+                    box_name_box = '{}_dataset/{}/bbox/{}_instance_{}.txt'.format(split, 'cars', i, c_i)
                     # write to pts file
                     label_box_utils.write_points_pts(pp, pts_name_pts)
                     label_box_utils.write_bboxes_box(box, box_name_box)
@@ -230,8 +290,8 @@ def full_scan():
                 instance_label[points_flag[c_i]] = 0
                 if len(pp) > min_points:
                     box = ped_bboxes[c_i]
-                    pts_name_pts = 'test_dataset/{}/points/{}_instance_{}.pts'.format('pedestrians', i, c_i)
-                    box_name_box = 'test_dataset/{}/bbox/{}_instance_{}.txt'.format('pedestrians', i, c_i)
+                    pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'pedestrians', i, c_i)
+                    box_name_box = '{}_dataset/{}/bbox/{}_instance_{}.txt'.format(split, 'pedestrians', i, c_i)
                     # write to pts file
                     label_box_utils.write_points_pts(pp, pts_name_pts)
                     label_box_utils.write_bboxes_box(box, box_name_box)
@@ -258,8 +318,8 @@ def full_scan():
                 instance_label[points_flag[c_i]] = 0
                 if len(pp) > min_points:
                     box = cyc_bboxes[c_i]
-                    pts_name_pts = 'test_dataset/{}/points/{}_instance_{}.pts'.format('cyclists', i, c_i)
-                    box_name_box = 'test_dataset/{}/bbox/{}_instance_{}.txt'.format('cyclists', i, c_i)
+                    pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'cyclists', i, c_i)
+                    box_name_box = '{}_dataset/{}/bbox/{}_instance_{}.txt'.format(split, 'cyclists', i, c_i)
                     # write to pts file
                     label_box_utils.write_points_pts(pp, pts_name_pts)
                     label_box_utils.write_bboxes_box(box, box_name_box)
@@ -279,7 +339,7 @@ def full_scan():
             if clu.shape[0] < min_points:
                 continue
             p = clu
-            pts_name_pts = 'test_dataset/{}/points/{}_instance_{}.pts'.format('oods', i, c_i)
+            pts_name_pts = '{}_dataset/{}/points/{}_instance_{}.pts'.format(split, 'oods', i, c_i)
             # write to pts file
             label_box_utils.write_points_pts(p, pts_name_pts)
 

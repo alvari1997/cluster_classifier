@@ -23,6 +23,7 @@ from scripts import merge_labels
 from scripts.laserscan import SemLaserScan, LaserScan
 import argparse
 from depth_cluster.build import Depth_Cluster
+#from ScanLineRun_cluster.build import ScanLineRun_Cluster
 import random
 import open3d as o3d
 import scipy.special as sci
@@ -38,7 +39,7 @@ parser.add_argument('--root',  dest= "root", default='./Dataset/semanticKITTI/',
 parser.add_argument('--range_y', dest= "range_y", default=64, help="64")
 parser.add_argument('--range_x', dest= "range_x", default=2048, help="2048")
 parser.add_argument('--minimum_points', dest= "minimum_points", default=40, help="minimum_points of each class")
-parser.add_argument('--which_cluster', dest= "which_cluster", default=1, help="4: ScanLineRun clustering; 3: superVoxel clustering; 2: euclidean; 1: depth_cluster; ")
+parser.add_argument('--which_cluster', dest= "which_cluster", default=1, help="2: ScanLineRun clustering; 3: superVoxel clustering; 4: euclidean; 1: depth_cluster; ")
 parser.add_argument('--mode', dest= "mode", default='val', help="val or test; ")
 args = parser.parse_args()
 
@@ -52,19 +53,24 @@ if args.which_cluster == 1:
 	cluster = Depth_Cluster.Depth_Cluster(0.3, 9) #angle threshold 0.15 (smaller th less clusters), search steps 9
     # 0.3 is good
 
+#if args.which_cluster == 2:
+#	cluster = ScanLineRun_Cluster.ScanLineRun_Cluster(0.5, 1)
+
 # points per cluster
 n_points = 128
 
 # classifier setup
 classifier = PointNetCls(k=3)
 classifier.cpu()
-classifier.load_state_dict(torch.load('cls_new_data_128p_voxel.pth'))
+#classifier.load_state_dict(torch.load('cls_weights_1_6.pth'))
+classifier.load_state_dict(torch.load('cls_no_data_aug.pth'))
 classifier.eval()
 
 # box estimator setup
 box_estimator = BoxNet(n_classes=3, n_channel=3)
 box_estimator.cpu()
-box_estimator.load_state_dict(torch.load('box_w_newdata.pth'))
+#box_estimator.load_state_dict(torch.load('box_weights_1_6.pth'))
+box_estimator.load_state_dict(torch.load('box_no_data_aug.pth'))
 box_estimator.eval()
 
 def key_func(x):
@@ -84,22 +90,25 @@ def full_scan():
     #load data
     #lidar_data = sorted(glob.glob('scripts/data3/*.bin'), key=key_func)
     #lidar_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/velodyne/*.bin'.format(sequence_in)), key=key_func)
-    #lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
+    lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/velodyne/*.bin'), key=key_func)
     #lidar_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/velodyne/*.bin'), key=key_func)
-    lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/velodyne_points/data/*.bin'), key=key_func)
+    #lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/velodyne_points/data/*.bin'), key=key_func)
+    #lidar_data = sorted(glob.glob('/home/alvari/Desktop/2011_09_28/2011_09_28_drive_0016_sync/velodyne_points/data/*.bin'), key=key_func)
     #label_data = sorted(glob.glob('/home/alvari/Desktop/semanticKITTI/dataset/sequences/{0}/labels/*.label'.format(sequence_in)), key=key_func)
     #calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
     calib_data = sorted(glob.glob('/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/calib/*.txt'), key=key_func)
 
-    #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
+    result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/training/'
     #result_dir = '/home/alvari/dataset_creator/Partial_Point_Clouds_Generation/kitti/testing/'
-    result_dir = '/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/'
+    #result_dir = '/home/alvari/Desktop/2011_09_26/2011_09_26_drive_0009_sync/'
+    #result_dir = '/home/alvari/Desktop/2011_09_28/2011_09_28_drive_0016_sync/'
+    #result_dir = '/home/alvari/Desktop/'
 
     pixel_accuracies = []
     IoUs = []
     total_times = []
 
-    for i in range(0, len(lidar_data)):
+    for i in range(len(lidar_data)-5000 , len(lidar_data)):
         total_time = 0
 
         Scan.open_scan(lidar_data[i])
@@ -155,7 +164,7 @@ def full_scan():
         ground_points = xyz[ground_mask]
         all_points = orig_xyz.reshape(-1, 3)
         start = time.time()
-        best_eq, best_inliers = plane.fit(pts=ground_points, all_pts=all_points, thresh=0.15, minPoints=100, maxIteration=100)
+        best_eq, best_inliers = plane.fit(pts=ground_points, all_pts=all_points, thresh=0.2, minPoints=100, maxIteration=100)
         stop = time.time()
         total_time += (stop-start)
         ground_points_ransac = all_points[best_inliers]
@@ -325,6 +334,7 @@ def full_scan():
             size_res_list = np.sum(size_residual.detach().numpy() * scls_onehot_repeat, axis=1)
             score_list1 = np.clip(-energy+energy_threshold, 0.01, 3) #np.ones((len(type_list)))
             score_list = (score_list1-0.01)/3 #np.random.uniform(low=0.01, high=1.00, size=(len(type_list),))
+            #score_list = np.ones((len(type_list))) 
 
             # in lidar coordinates
             write_predictions = write_detection_results_lidar(result_dir, id_list, type_list, box2d_list, center_list, \

@@ -77,6 +77,8 @@ class Object3d(object):
         self.t = (data[11], data[12], data[13])  # location (x,y,z) in camera coord.
         self.ry = data[14]  # yaw angle (around Y-axis in camera coordinates) [-pi..pi]
 
+        self.score = data[15]
+
     def estimate_diffculty(self):
         """ Function that estimate difficulty to detect the object as defined in kitti website"""
         # height of the bounding box
