@@ -244,16 +244,16 @@ for epoch in range(opt.nepoch):
         loss = losses['total_loss']
 
         # add energy loss
-        m_in = -5 
-        m_out = -2 
+        m_in = -9 
+        m_out = -6 
         Ec_out = -torch.logsumexp(heading_scores[len(data[0]):], dim=1)
         Ec_in = -torch.logsumexp(heading_scores[:len(data[0])], dim=1)
-        loss += 0.1*(torch.pow(F.relu(Ec_in-m_in), 2).mean() + torch.pow(F.relu(m_out-Ec_out), 2).mean()) # heading
-        m_in = -5 
-        m_out = -2 
+        loss += 0.05*(torch.pow(F.relu(Ec_in-m_in), 2).mean() + torch.pow(F.relu(m_out-Ec_out), 2).mean()) # heading
+        m_in = -5
+        m_out = -2
         Ec_out = -torch.logsumexp(size_scores[len(data[0]):], dim=1)
         Ec_in = -torch.logsumexp(size_scores[:len(data[0])], dim=1)
-        loss += 0.1*(torch.pow(F.relu(Ec_in-m_in), 2).mean() + torch.pow(F.relu(m_out-Ec_out), 2).mean()) # size
+        loss += 0.05*(torch.pow(F.relu(Ec_in-m_in), 2).mean() + torch.pow(F.relu(m_out-Ec_out), 2).mean()) # size
 
         loss.backward()
         optimizer.step()
