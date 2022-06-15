@@ -131,7 +131,7 @@ def ground_seg_benchmark():
             ground_prediction_packet = np.zeros((64, packet_w))
 
         # visualize
-        '''normed = cv2.normalize(range_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        normed = cv2.normalize(range_processed, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
         color = cv2.applyColorMap(normed, cv2.COLORMAP_HOT)
         scale_percent = 100 # percent of original size
         width = int(color.shape[1] * scale_percent / 100)
@@ -140,7 +140,7 @@ def ground_seg_benchmark():
         color = cv2.resize(color, dim, interpolation = cv2.INTER_AREA)
         cv2.imshow("Range projection with predicted ground removed", color)
         cv2.imshow("Predicted ground mask", ground_prediction_processed)
-        cv2.waitKey(1000)'''
+        cv2.waitKey(1000)
 
         # check ground accuracy
         TP = np.sum(np.logical_and(ground_prediction_processed == 1, gt_i == 1))
