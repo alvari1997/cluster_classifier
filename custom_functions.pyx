@@ -1,8 +1,6 @@
 import numpy as np
 cimport numpy as np
 import time
-#import cv2
-#from collections import deque
 from cpython cimport array
 import array
 
@@ -30,65 +28,6 @@ def groundRemoval(np.ndarray[np.float64_t, ndim=3] packet): # remove ground with
                             packet[i, j, k] = 0
                         packet[i,j,6] = 1 # label ground
     return packet
-
-'''def clustering(np.ndarray[np.float64_t, ndim=3] packet):
-    cdef Py_ssize_t i,j
-    cdef int l = 1
-    for i in range(packet.shape[0]):
-        for j in range(packet.shape[1]):
-            if packet[i,j,6] == 0: #unlabeled
-                #print(i,j)
-                bfs(packet,i,j,l)
-                l = l + 1
-
-    #bfs(packet,1,1,l)
-
-def bfs(np.ndarray[np.float64_t, ndim=3] packet, int r, int c, int l):
-
-    cdef Py_ssize_t i,g
-    cdef list r_queue = []
-    cdef list c_queue = []
-    cdef int rr
-    cdef int cc
-    cdef list dr = [-1,1,0,0]
-    cdef list dc = [0,0,1,-1]
-
-    cdef int ri 
-    cdef int ci 
-
-    #cdef list queue = []
-    #queue.append(r) # =push, put item on the right
-    #queue.append(r) # =push, put item on the right
-    #queue.append(r) # =push, put item on the right
-    #cdef int gg = queue[-1] # top=, get the element on the right
-    #print(gg)
-    #queue.pop() # =pop, remove item on the right
-
-    #push starting point on the queue
-    r_queue.append(r)
-    c_queue.append(c)
-    while len(r_queue) > 0:
-        #print(len(r_queue))
-        ri = r_queue[-1]
-        ci = c_queue[-1]
-        #packet[ri,ci,6] = l #label a point
-        for i in range(4): #get neighbours
-            rr = ri + dr[i]
-            cc = ci + dc[i]
-            if rr < 0 or rr >= packet.shape[0]: continue
-            if cc < 0 or cc >= packet.shape[1]: continue
-            if packet[rr, cc, 6] != 0: continue #already labeled
-            #if packet[rr, cc, 3] == 0: continue 
-
-            if abs(packet[ri,ci,3] - packet[rr,cc,3]) > 0.1 and abs(packet[ri,ci,3] - packet[rr,cc,3]) < 0.6:
-                r_queue.append(rr)
-                c_queue.append(cc)
-                packet[rr, cc, 6] = l 
-        
-        r_queue.pop()
-        c_queue.pop()
-        #print(len(r_queue))'''
-
 
 def mergeLabels(np.ndarray[np.double_t, ndim=2] cluster_prediction_processed, np.ndarray[np.long_t, ndim=2] new_boundary, int packet_w):
     old_boundary = cluster_prediction_processed[0:64, cluster_prediction_processed.shape[1]-packet_w-2:cluster_prediction_processed.shape[1]-packet_w]

@@ -2,7 +2,6 @@ import random
 import numpy as np
 
 class Plane:
-
     def __init__(self):
         self.inliers = []
         self.equation = []
@@ -24,12 +23,8 @@ class Plane:
 
                 vecA = pt_samples[1, :] - pt_samples[0, :]
                 vecB = pt_samples[2, :] - pt_samples[0, :]
-
-                # compute the cross product of vecA and vecB to get vecC which is normal to the plane
                 vecC = np.cross(vecA, vecB)
 
-                # plane equation is vecC[0]*x + vecC[1]*y + vecC[0]*z = -k
-                # let's use a point to find k
                 vecC = vecC / np.linalg.norm(vecC)
                 k = -np.sum(np.multiply(vecC, pt_samples[1, :]))
                 plane_eq = [vecC[0], vecC[1], vecC[2], k]
