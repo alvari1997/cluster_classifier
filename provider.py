@@ -4,6 +4,9 @@ from __future__ import print_function
 import sys
 import os
 import numpy as np
+import random
+
+from torch import rand
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(BASE_DIR)
 sys.path.append(BASE_DIR)
@@ -12,11 +15,57 @@ from box_util import box3d_iou
 from model_utils import g_type2class, g_class2type, g_type2onehotclass
 from model_utils import g_type_mean_size, g_type_mean_size2
 from model_utils import NUM_HEADING_BIN, NUM_SIZE_CLUSTER
+import kitti_util
 
 #try:
 #    raw_input          # Python 2
 #except NameError:
 raw_input = input  # Python 3
+
+def boxes_to_corners_3d(boxes3d):
+    """
+        7 -------- 4
+       /|         /|
+      6 -------- 5 .
+      | |        | |
+      . 3 -------- 0
+      |/         |/
+      2 -------- 1
+    Args:
+        boxes3d:  (N, 7) [x, y, z, dx, dy, dz, heading], (x, y, z) is the box center
+
+    Returns:
+        corners3d: (N, 8, 3)
+    """
+    template = np.array([
+        [1, 1, -1], [1, -1, -1], [-1, -1, -1], [-1, 1, -1],
+        [1, 1, 1], [1, -1, 1], [-1, -1, 1], [-1, 1, 1],
+    ]) / 2
+
+    corners3d = boxes3d[:, None, 3:6] * template[None, :, :]
+    corners3d = rotate_points_along_z(corners3d, boxes3d[:, 6]).reshape(-1, 8, 3)
+    corners3d += boxes3d[:, None, 0:3]
+    return corners3d
+
+def rotate_points_along_z(points, angle):
+    """
+    Args:
+        points: (B, N, 3)
+        angle: (B), angle along z-axis, angle increases x ==> y
+
+    Returns:
+    """
+    cosa = np.cos(angle)
+    sina = np.sin(angle)
+    ones = np.ones_like(angle, dtype=np.float32)
+    zeros = np.zeros_like(angle, dtype=np.float32)
+    rot_matrix = np.stack((
+        cosa,  sina, zeros,
+        -sina, cosa, zeros,
+        zeros, zeros, ones
+    ), axis=1).reshape(-1, 3, 3)
+    points_rot = np.matmul(points, rot_matrix)
+    return points_rot
 
 
 def rotate_pc_along_y(pc, rot_angle):
@@ -422,7 +471,7 @@ def write_detection_results_lidar(result_dir, id_list, type_list, box2d_list, ce
     for i in range(len(center_list)):
         idx = id_list[i] # idx is the number of the scan
         output_str = type_list[i] + " -1 -1 -10 "
-        box2d = box2d_list[i] # for bev detection, leave to zero for now
+        box2d = box2d_list[i] 
         output_str += "%.3f %.3f %.3f %.3f " % (box2d[0],box2d[1],box2d[2],box2d[3])
         h,w,l,tx,ty,tz,ry = from_prediction_to_label_format_lidar(center_list[i],
             heading_cls_list[i], heading_res_list[i],
@@ -447,7 +496,8 @@ def from_prediction_to_label_format_cam(center, angle_class, angle_res,\
                                     size_class, size_res, V2C, R0):
     ''' Convert predicted box parameters to label format. '''
     l,w,h = class2size(size_class, size_res)
-    ry = + np.pi/2 - class2angle(angle_class, angle_res, NUM_HEADING_BIN) 
+    #ry = np.pi/2 - class2angle(angle_class, angle_res, NUM_HEADING_BIN) 
+    ry = -class2angle(angle_class, angle_res, NUM_HEADING_BIN) 
 
     center = center[None, :]
 
@@ -462,20 +512,28 @@ def from_prediction_to_label_format_cam(center, angle_class, angle_res,\
 
 def write_detection_results_cam(result_dir, id_list, type_list, box2d_list, center_list, \
                             heading_cls_list, heading_res_list, \
-                            size_cls_list, size_res_list, score_list, lidar2cam, R0):
+                            size_cls_list, size_res_list, score_list, lidar2cam, R0, calib_file):
     ''' Write results to KITTI format label files. '''
     if result_dir is None: return
     results = {} # map from idx to list of strings, each string is a line (without \n)
+    calib = kitti_util.Calibration(calib_file)
     for i in range(len(center_list)):
         idx = id_list[i] # idx is the number of the scan
-        output_str = type_list[i] + " -1 -1 -10 "
-        box2d = box2d_list[i] # for bev detection, leave to zero for now
-        output_str += "%.3f %.3f %.3f %.3f " % (box2d[0],box2d[1],box2d[2],box2d[3])
+        output_str = type_list[i] + " -1.00 -1 -10.00 "
         h,w,l,tx,ty,tz,ry = from_prediction_to_label_format_cam(center_list[i],
             heading_cls_list[i], heading_res_list[i],
             size_cls_list[i], size_res_list[i], lidar2cam, R0)
+        boxx = from_prediction_to_label_format_lidar(center_list[i],
+            heading_cls_list[i], heading_res_list[i],
+            size_cls_list[i], size_res_list[i])
+        boxx = np.asarray([[boxx[3], boxx[4], boxx[5], boxx[2], boxx[1], boxx[0], np.pi/2-boxx[6]]])
+        #print(boxx)
+        corners = boxes_to_corners_3d(boxx)
+        box2d = calib.project_velo_to_4p(corners)
+        #box2d = box2d_list[i] 
+        output_str += "%.2f %.2f %.2f %.2f " % (box2d[0], box2d[1], box2d[2], box2d[3])
         score = score_list[i]
-        output_str += "%.3f %.3f %.3f %.3f %.3f %.3f %.3f %.1f" % (h,w,l,tx,ty,tz,ry, score)
+        output_str += "%.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f" % (h,w,l,tx,ty,tz,ry, score)
         if idx not in results: results[idx] = []
         results[idx].append(output_str)
 

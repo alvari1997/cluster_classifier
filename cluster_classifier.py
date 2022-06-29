@@ -59,18 +59,27 @@ classifier.cpu()
 #classifier.load_state_dict(torch.load('cls_weights_1_6.pth'))
 #classifier.load_state_dict(torch.load('cls_no_data_aug.pth'))
 #classifier.load_state_dict(torch.load('cls_epoch_99.pth'))
-classifier.load_state_dict(torch.load('cls_epoch_50.pth'))
+#classifier.load_state_dict(torch.load('cls_epoch_50.pth'))
+#classifier.load_state_dict(torch.load('cls_epoch_299.pth')) # 2
+#classifier.load_state_dict(torch.load('cls_new.pth'))
+#classifier.load_state_dict(torch.load('cls_new_1.pth'))
+#classifier.load_state_dict(torch.load('cls_new_2.pth'))
+#classifier.load_state_dict(torch.load('cls_pvle8.pth'))
+#classifier.load_state_dict(torch.load('cls_new_rot.pth'))
+classifier.load_state_dict(torch.load('cls_29_6.pth')) # 1
 classifier.eval()
 
 # box estimator setup
 box_estimator = BoxNet(n_classes=3, n_channel=3)
 box_estimator.cpu()
 #box_estimator.load_state_dict(torch.load('box_weights_1_6.pth'))
-box_estimator.load_state_dict(torch.load('box_no_data_aug.pth'))
+#box_estimator.load_state_dict(torch.load('box_no_data_aug.pth'))
 #box_estimator.load_state_dict(torch.load('box_energy.pth'))
 #box_estimator.load_state_dict(torch.load('box_epoch_99.pth'))
 #box_estimator.load_state_dict(torch.load('box_epoch_199.pth'))
 #box_estimator.load_state_dict(torch.load('box_epoch_248.pth'))
+box_estimator.load_state_dict(torch.load('box_flip_only_new.pth')) 
+#box_estimator.load_state_dict(torch.load('box_shift_flip.pth')) # 1
 box_estimator.eval()
 
 def key_func(x):
@@ -171,18 +180,13 @@ def full_scan():
         for c in cluster_instance_ids:
             cluster_i = xyz[instance_label == c].reshape(-1, 3)
             #target = np.bincount(semantic_label_img[instance_label == c].astype(int)).argmax()
-            if len(cluster_i) < min_points:
-                continue
-
+            if len(cluster_i) < min_points: continue
             original_len = len(cluster_i)
             
             # remove big cluster
-            if abs(np.max(cluster_i[:, 0]) - np.min(cluster_i[:, 0])) > 5:
-                continue
-            if abs(np.max(cluster_i[:, 1]) - np.min(cluster_i[:, 1])) > 5:
-                continue
-            if abs(np.max(cluster_i[:, 2]) - np.min(cluster_i[:, 2])) > 5:
-                continue
+            if abs(np.max(cluster_i[:, 0]) - np.min(cluster_i[:, 0])) > 6: continue
+            if abs(np.max(cluster_i[:, 1]) - np.min(cluster_i[:, 1])) > 6: continue
+            if abs(np.max(cluster_i[:, 2]) - np.min(cluster_i[:, 2])) > 6: continue
 
             # sample cluster
             choice = np.random.choice(len(cluster_i), n_points, replace=True)
@@ -190,6 +194,7 @@ def full_scan():
             
             # origin to cluster center
             center = np.expand_dims(np.mean(cluster_i, axis = 0), 0)
+            if center[0][2] > 0: continue
             cluster_i = cluster_i - center
 
             # world position vector
@@ -248,7 +253,7 @@ def full_scan():
         energy = -sci.logsumexp(np_out, axis=1)
 
         # OOD dropout
-        energy_threshold = -e_th # -4.7, 3.5
+        energy_threshold = -e_th
         nn_input_points = nn_input_points[energy < energy_threshold, :, :]
         nn_input_dist = nn_input_dist[energy < energy_threshold, :]
         nn_input_voxel = nn_input_voxel[energy < energy_threshold, :]
@@ -321,7 +326,7 @@ def full_scan():
             V2C = calib_file['Tr_velo2cam']
             R0 = calib_file['R0']
             write_predictions = write_detection_results_cam(result_dir, id_list, type_list, box2d_list, center_list, \
-                                heading_cls_list, heading_res_list, size_cls_list, size_res_list, score_list, V2C, R0)
+                                heading_cls_list, heading_res_list, size_cls_list, size_res_list, score_list, V2C, R0, calib_data[i])
         else:
             if result_dir is None: return
             results = {} # map from idx to list of strings, each string is a line (without \n)
